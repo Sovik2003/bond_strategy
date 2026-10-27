@@ -1,10 +1,4 @@
-"""Жёсткие фильтры допуска выпуска к анализу.
-
-Важное отличие реального контура от тестового: MOEX ISS не отдаёт
-кредитный рейтинг. Поэтому отсутствие рейтинга НЕ означает «нет данных» —
-оно означает, что оценка качества опирается на уровень листинга.
-Это фиксируется отдельным статусом, а не подменяется выдуманным рейтингом.
-"""
+"""Жёсткие фильтры допуска. Каждый отказ имеет код и текст причины."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -13,22 +7,10 @@ from datetime import date
 from ..config import StrategyConfig
 from ..models import BondIssue, DataStatus, Quality
 
-# Поля, отсутствие которых в ISS ожидаемо и не блокирует анализ.
-RATING_PLACEHOLDER = "UNVERIFIED"
-
-# Поля, отсутствие которых в ISS ожидаемо и не блокирует анализ.
-#   rating   — ISS кредитных рейтингов не отдаёт;
-#   industry — ISS отраслей не отдаёт.
-# Отсутствие этих полей Limit-проверками учитывается отдельно: лимит по
-# отрасли в таком случае не применяется, а качество оценивается по прокси.
-# Всё остальное (цена, НКД, купон, погашение, доступность, дефолт, ликвидность)
-# по-прежнему блокирует покупку.
-NON_BLOCKING_FIELDS = {"rating", "industry"}
-
 
 @dataclass
 class FilterResult:
-    passed: bool
+    passed: bool = True
     reasons: list[tuple[str, str]] = field(default_factory=list)
 
     def fail(self, code: str, text: str) -> "FilterResult":
@@ -36,41 +18,43 @@ class FilterResult:
         self.reasons.append((code, text))
         return self
 
+    @property
+    def codes(self) -> set[str]:
+        return {code for code, _ in self.reasons}
 
-def hard_filter(issue: BondIssue, settlement: date, cfg: StrategyConfig) -> FilterResult:
-    result = FilterResult(passed=True)
 
-    # --- критические данные (кроме рейтинга — он отсутствует в ISS по определению)
-    critical_blockers = {
-        name: st
-        for name, st in issue.status.items()
-        if st.blocks_buy and name not in NON_BLOCKING_FIELDS
-    }
-    if critical_blockers:
-        worst = _worst(critical_blockers.values())
-        result.fail(
-            f"DATA_BLOCKED_{worst.value}",
-            "Критические данные не подтверждены: "
-            + ", ".join(sorted(critical_blockers)),
-        )
+def hard_filter(issue: BondIssue, as_of: date, cfg: StrategyConfig) -> FilterResult:
+    """Любое нарушение — отказ. Проверки идут от данных к свойствам выпуска."""
+    result = FilterResult()
+
+    worst = issue.critical_status()
+    if worst is not DataStatus.FRESH:
+        blocked = ", ".join(issue.blocked_fields()) or "нет полей"
+        result.fail(f"DATA_BLOCKED_{worst.value}", f"Данные не подтверждены: {blocked}")
 
     if issue.default_flag:
         result.fail("EXCLUDED_DEFAULT", "Подтверждён дефолт")
     if issue.restructuring_flag:
         result.fail("EXCLUDED_RESTRUCTURING", "Объявлена реструктуризация")
-    if issue.offer_flag:
-        result.fail("EXCLUDED_OFFER", "Есть будущая оферта")
+    if issue.offer_date is not None and issue.offer_date > as_of:
+        result.fail("EXCLUDED_OFFER", f"Оферта {issue.offer_date.isoformat()}")
     if issue.coupon_type != "FIXED":
-        result.fail("EXCLUDED_FLOATING_COUPON", "Не фиксированный купон")
+        result.fail("EXCLUDED_COUPON_TYPE", f"Тип купона: {issue.coupon_type}")
     if issue.qualified_only:
         result.fail("EXCLUDED_QUALIFIED_ONLY", "Только для квалифицированных инвесторов")
     if not issue.reporting_sufficient:
-        result.fail("EXCLUDED_REPORTING", "Недостаточное раскрытие")
+        result.fail("EXCLUDED_REPORTING", "Раскрытие не проверено")
+    if issue.rating is None:
+        result.fail("EXCLUDED_NO_RATING", "Нет рейтинга в справочнике")
+
+    max_level = int(cfg.get("filters", "max_list_level"))
+    if issue.list_level is not None and issue.list_level > max_level:
+        result.fail("EXCLUDED_LIST_LEVEL", f"Уровень листинга {issue.list_level} > {max_level}")
 
     if issue.maturity_date is None:
-        result.fail("EXCLUDED_NO_MATURITY", "Не указана дата погашения")
+        result.fail("EXCLUDED_NO_MATURITY", "Нет даты погашения")
     else:
-        days = (issue.maturity_date - settlement).days
+        days = (issue.maturity_date - as_of).days
         min_days = int(cfg.get("filters", "min_days_to_maturity"))
         if days < min_days:
             result.fail("EXCLUDED_TOO_SHORT", f"До погашения {days} дн. < {min_days}")
@@ -94,12 +78,3 @@ def hard_filter(issue: BondIssue, settlement: date, cfg: StrategyConfig) -> Filt
             result.fail("EXCLUDED_WIDE_SPREAD", f"Спред {issue.avg_spread:.3%} > {max_spread:.3%}")
 
     return result
-
-
-def _worst(values) -> DataStatus:
-    order = [DataStatus.CONFLICT, DataStatus.MISSING, DataStatus.UNVERIFIED, DataStatus.STALE]
-    present = set(values)
-    for level in order:
-        if level in present:
-            return level
-    return DataStatus.FRESH

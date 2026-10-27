@@ -1,4 +1,7 @@
-"""Доменные модели аналитического ядра."""
+"""Доменные модели аналитического ядра.
+
+Только структуры и инварианты. Бизнес-логика — в analytics/validation/signals/portfolio.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -17,6 +20,15 @@ class DataStatus(str, Enum):
     @property
     def blocks_buy(self) -> bool:
         return self is not DataStatus.FRESH
+
+
+_STATUS_SEVERITY = [
+    DataStatus.CONFLICT,
+    DataStatus.MISSING,
+    DataStatus.UNVERIFIED,
+    DataStatus.STALE,
+    DataStatus.FRESH,
+]
 
 
 class Quality(str, Enum):
@@ -38,7 +50,6 @@ class OperationType(str, Enum):
     COUPON = "COUPON"
     AMORTIZATION = "AMORTIZATION"
     REDEMPTION = "REDEMPTION"
-    COMMISSION = "COMMISSION"
 
 
 class RiskMode(str, Enum):
@@ -47,57 +58,36 @@ class RiskMode(str, Enum):
     CAPITAL_PROTECTION = "CAPITAL_PROTECTION"
     FULL_STOP = "FULL_STOP"
 
+
+@dataclass(frozen=True)
 class AmortizationPayment:
-    """Одна амортизационная выплата: доля номинала на дату."""
+    """Погашение доли номинала на дату."""
 
-    __slots__ = ("payment_date", "share_of_nominal")
+    payment_date: date
+    share_of_nominal: float
 
-    def __init__(self, payment_date: date, share_of_nominal: float) -> None:
-        if not 0 < share_of_nominal <= 1:
+    def __post_init__(self) -> None:
+        if not 0 < self.share_of_nominal <= 1:
             raise ValueError("share_of_nominal должен быть в (0, 1]")
-        self.payment_date = payment_date
-        self.share_of_nominal = share_of_nominal
-
-    def __repr__(self) -> str:
-        return f"Amortization({self.payment_date}, {self.share_of_nominal:.2%})"
-
-
-class CouponPayment:
-    """Фактическая купонная выплата на одну бумагу в рублях.
-
-    Нужна потому, что у реальных выпусков ставка меняется от периода к периоду,
-    а купон начисляется на остаточный номинал. Генерация потока из одной
-    постоянной ставки дала бы неверную доходность.
-    """
-
-    __slots__ = ("payment_date", "amount_per_bond")
-
-    def __init__(self, payment_date: date, amount_per_bond: float) -> None:
-        if amount_per_bond < 0:
-            raise ValueError("amount_per_bond не может быть отрицательным")
-        self.payment_date = payment_date
-        self.amount_per_bond = amount_per_bond
-
-    def __repr__(self) -> str:
-        return f"Coupon({self.payment_date}, {self.amount_per_bond:.2f})"
 
 
 @dataclass
 class BondIssue:
     isin: str
-    ticker: str
+    secid: str
     issuer_id: str
     issuer_name: str
     industry: str
     nominal: float = 1000.0
+    initial_nominal: float = 1000.0          # до амортизации; база для долей
     coupon_type: str = "FIXED"
-    coupon_rate: Optional[float] = None
+    coupon_rate: Optional[float] = None       # годовая ставка долей
     coupon_frequency: int = 2
     maturity_date: Optional[date] = None
-    offer_flag: bool = False
+    offer_date: Optional[date] = None
     amortization: list[AmortizationPayment] = field(default_factory=list)
-    coupons: list[CouponPayment] = field(default_factory=list)
     qualified_only: bool = False
+    list_level: Optional[int] = None
     min_lot: int = 1
     quality: Quality = Quality.HIGH
     rating: Optional[str] = None
@@ -105,20 +95,22 @@ class BondIssue:
     rating_date: Optional[date] = None
     default_flag: bool = False
     restructuring_flag: bool = False
-    reporting_sufficient: bool = True
+    reporting_sufficient: bool = False
 
-    net_debt_to_ebitda: Optional[float] = None
-    interest_coverage: Optional[float] = None
-    list_level: Optional[int] = None
-    credit_basis: str = "UNKNOWN"
-
+    # рыночные данные
     clean_price: Optional[float] = None
     accrued_interest: Optional[float] = None
     price_date: Optional[date] = None
     avg_daily_turnover: Optional[float] = None
     avg_spread: Optional[float] = None
-    ytm: Optional[float] = None
     ofz_ytm: Optional[float] = None
+
+    # фактический график купонов из ISS: [(дата выплаты, руб. на бумагу)]
+    coupon_schedule: list[tuple[date, float]] = field(default_factory=list)
+
+    # финансовые метрики
+    net_debt_to_ebitda: Optional[float] = None
+    interest_coverage: Optional[float] = None
 
     status: dict[str, DataStatus] = field(default_factory=dict)
 
@@ -128,17 +120,10 @@ class BondIssue:
         return self.clean_price + self.accrued_interest
 
     def critical_status(self) -> DataStatus:
-        if not self.status:
-            return DataStatus.MISSING
-        order = [
-            DataStatus.CONFLICT,
-            DataStatus.MISSING,
-            DataStatus.UNVERIFIED,
-            DataStatus.STALE,
-            DataStatus.FRESH,
-        ]
         present = set(self.status.values())
-        for level in order:
+        if not present:
+            return DataStatus.MISSING
+        for level in _STATUS_SEVERITY:
             if level in present:
                 return level
         return DataStatus.FRESH
@@ -157,15 +142,14 @@ class Position:
     accrued_interest: float
     received_coupons: float = 0.0
     received_amortization: float = 0.0
-    status: str = "OPEN"
 
     def market_value(self, clean: float, nkd: float) -> float:
         return self.quantity * (clean + nkd) / 100.0 * self.nominal_outstanding
 
 
-@dataclass
+@dataclass(frozen=True)
 class Trade:
-    trade_id: str
+    event_key: str
     isin: str
     operation_type: OperationType
     event_date: date
@@ -175,7 +159,6 @@ class Trade:
     nominal: float
     commission: float
     amount: float
-    event_key: str
     signal_id: Optional[str] = None
 
 
@@ -188,6 +171,6 @@ class Signal:
     score: float
     reasons: list[str] = field(default_factory=list)
     failed_conditions: list[str] = field(default_factory=list)
-    review_date: Optional[date] = None
     suggested_amount: Optional[float] = None
+    suggested_quantity: Optional[int] = None
     config_id: str = ""

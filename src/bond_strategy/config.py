@@ -1,4 +1,8 @@
-"""Загрузка и версионирование конфигурации стратегии."""
+"""Конфигурация с идентификатором версии.
+
+Пороги живут здесь, а не в коде: расчёт сохраняет config_id, поэтому
+историческое решение можно воспроизвести.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -38,66 +42,12 @@ class StrategyConfig:
         return float(self.get("signals", "min_buy_score"))
 
     @property
-    def cooldown_days(self) -> int:
-        return int(self.get("signals", "duplicate_cooldown_days"))
+    def broker_rate(self) -> float:
+        return float(self.get("commissions", "broker_rate", default=0.0))
 
 
-DEFAULT_CONFIG: dict[str, Any] = {
-    "version": "1.1.0",
-    "capital": {
-        "initial": 50000,
-        "reserve_base": 10000,
-        "reserve_conservative": 20000,
-        "reserve_income": 8000,
-    },
-    "limits": {
-        "issuer_max_share": 0.25,
-        "issue_max_share": 0.25,
-        "industry_max_share": 0.40,
-        "medium_quality_max_share": 0.25,
-        "max_long_maturity_share": 0.20,
-    },
-    "filters": {
-        "min_position": 8000,
-        "min_daily_turnover": 300000,
-        "max_spread_core": 0.005,
-        "max_spread_medium": 0.01,
-        "min_days_to_maturity": 180,
-        "preferred_min_days": 270,
-        "preferred_max_years": 3,
-        "max_bonds_total": 0,
-    },
-    "signals": {
-        "min_buy_score": 80,
-        "core_premium_min": 0.01,
-        "medium_premium_min": 0.02,
-        "duplicate_cooldown_days": 5,
-    },
-    "scoring_weights": {
-        "credit": 0.35,
-        "financial": 0.20,
-        "yield": 0.20,
-        "liquidity": 0.15,
-        "structure": 0.10,
-    },
-    "freshness": {
-        "price_max_age_days": 2,
-        "rating_max_age_days": 400,
-        "turnover_max_age_days": 5,
-    },
-}
-
-
-def build_config(data: dict[str, Any]) -> StrategyConfig:
+def load_config(path: str | Path) -> StrategyConfig:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     canonical = json.dumps(data, sort_keys=True, ensure_ascii=False)
-    return StrategyConfig(raw=data, config_id=hashlib.sha256(canonical.encode()).hexdigest()[:12])
-
-
-def load_config(path: str | Path | None = None) -> StrategyConfig:
-    """Читает конфиг из файла, иначе использует встроенный DEFAULT_CONFIG."""
-    if path is None:
-        path = Path("config/strategy.json")
-    path = Path(path)
-    if path.exists():
-        return build_config(json.loads(path.read_text(encoding="utf-8")))
-    return build_config(DEFAULT_CONFIG)
+    config_id = hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
+    return StrategyConfig(raw=data, config_id=config_id)
