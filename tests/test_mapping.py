@@ -25,7 +25,7 @@ from bond_strategy.ingestion.moex import (
     dt,
     num,
 )
-from bond_strategy.models import Quality
+from bond_strategy.models import DataStatus, Quality
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -239,3 +239,61 @@ def test_empty_issuer_directory_is_valid():
 
 def test_quality_without_issuer_is_medium():
     assert quality_for(None) is Quality.MEDIUM
+
+
+# ---------- дата цены ----------
+
+
+def test_price_date_from_prevdate_not_systime(description, bondization, cfg):
+    """SYSTIME — время ответа сервера, а не дата цены.
+
+    Раньше price_date брался из SYSTIME. При расчёте на прошлую дату это
+    давало отрицательный возраст цены и статус STALE у свежих данных.
+    """
+    row = {
+        "SECID": "RU000A10FEP7",
+        "PREVPRICE": 99.89,
+        "ACCRUEDINT": 0.75,
+        "LOTSIZE": 1,
+        "PREVDATE": "2026-10-23",
+        "SYSTIME": "2026-10-27 08:15:00",
+    }
+    issue = build_issue(row, description, bondization, date(2026, 10, 26), {}, cfg)
+    assert issue.price_date == date(2026, 10, 23)
+    assert issue.status["price"] is DataStatus.FRESH
+
+
+def test_price_date_tradedate_wins_over_prevdate(description, bondization, cfg):
+    """TRADEDATE точнее: если ISS его отдал, берётся он."""
+    row = {
+        "SECID": "RU000A10FEP7",
+        "PREVPRICE": 99.89,
+        "ACCRUEDINT": 0.75,
+        "LOTSIZE": 1,
+        "TRADEDATE": "2026-10-26",
+        "PREVDATE": "2026-10-23",
+    }
+    issue = build_issue(row, description, bondization, date(2026, 10, 26), {}, cfg)
+    assert issue.price_date == date(2026, 10, 26)
+
+
+def test_missing_price_date_is_unverified_not_stale(description, bondization, cfg):
+    """Без даты цены статус UNVERIFIED, а не STALE и не свежий."""
+    row = {"SECID": "RU000A10FEP7", "PREVPRICE": 99.89, "ACCRUEDINT": 0.75, "LOTSIZE": 1}
+    issue = build_issue(row, description, bondization, date(2026, 10, 26), {}, cfg)
+    assert issue.price_date is None
+    assert issue.status["price"] is DataStatus.UNVERIFIED
+    assert issue.status["price"].blocks_buy is True
+
+
+def test_old_price_is_stale(description, bondization, cfg):
+    """Цена старше допуска действительно STALE — проверка не сломана."""
+    row = {
+        "SECID": "RU000A10FEP7",
+        "PREVPRICE": 99.89,
+        "ACCRUEDINT": 0.75,
+        "LOTSIZE": 1,
+        "PREVDATE": "2026-09-01",
+    }
+    issue = build_issue(row, description, bondization, date(2026, 10, 26), {}, cfg)
+    assert issue.status["price"] is DataStatus.STALE

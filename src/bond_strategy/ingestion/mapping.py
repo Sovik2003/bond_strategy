@@ -105,6 +105,24 @@ def quality_for(issuer: IssuerRecord | None) -> Quality:
     return Quality.HIGH if issuer.rating.upper() in SENIOR_RATINGS else Quality.MEDIUM
 
 
+def price_date_for(row: dict) -> date | None:
+    """Дата, на которую актуальна цена из блока securities.
+
+    PREVPRICE — цена предыдущего закрытия, и её дата лежит в PREVDATE.
+    Брать вместо неё SYSTIME нельзя: это серверное время ответа, а не дата
+    цены. При расчёте на прошлую дату SYSTIME давал отрицательный возраст
+    цены и статус STALE у заведомо свежих данных.
+
+    TRADEDATE в ответе борды отсутствует — это поле истории, — но остаётся
+    первым кандидатом: если ISS его отдаст, он точнее.
+    """
+    for field in ("TRADEDATE", "PREVDATE"):
+        value = dt(row.get(field))
+        if value is not None:
+            return value
+    return None
+
+
 def build_issue(
     row: dict,
     description: dict[str, str],
@@ -138,7 +156,7 @@ def build_issue(
 
     clean_price = num(row.get("PREVPRICE")) or num(row.get("CLOSEPRICE")) or num(row.get("LAST"))
     nkd = num(row.get("ACCRUEDINT"))
-    price_date = dt(row.get("TRADEDATE")) or dt(row.get("SYSTIME"))
+    price_date = price_date_for(row)
 
     bid, offer = num(row.get("BID")), num(row.get("OFFER"))
     spread = (offer - bid) / ((offer + bid) / 2.0) if (bid and offer and bid > 0 and offer > 0) else None
