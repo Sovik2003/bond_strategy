@@ -1,0 +1,19 @@
+{
+  "ISIN": "RU000A10FEP7",
+  "SHORTNAME": "СБСекр5АС",
+  "NAME": "СФО СБ Секьюритизация 5 кл.АC",
+  "MATDATE": "2035-06-26",
+  "FACEVALUE": "862.98",
+  "INITIALFACEVALUE": "1000",
+  "FACEVALUE_TYPE": "Фиксированный",
+  "FACEUNIT": "SUR",
+  "COUPONPERCENT": "15.8",
+  "COUPONFREQUENCY": "12",
+  "COUPONVALUE": "11.58",
+  "BOND_TYPE": "Амортизируемая облигация",
+  "LISTLEVEL": "3",
+  "ISQUALIFIEDINVESTORS": "0",
+  "EMITTER_ID": "15518",
+  "ISSUESIZE": "38411000",
+  "ISSUEDATE": "2026-07-14"
+}

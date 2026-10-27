@@ -1,7 +1,7 @@
 [project]
 name = "bond-strategy"
-version = "0.2.0"
-description = "Аналитическое ядро облигационной стратегии: MOEX ISS, скринер, сигналы, модельный портфель"
+version = "1.0.0"
+description = "Аналитическое ядро облигационной стратегии: MOEX ISS, скринер, сигналы, виртуальный портфель"
 requires-python = ">=3.11"
 dependencies = []
 
@@ -23,9 +23,5 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-q"
 markers = [
-    "slow: обращается к сети MOEX ISS, выполняется дольше",
-    "network: требует доступности внешних источников",
-]
-filterwarnings = [
-    "ignore::DeprecationWarning",
+    "network: обращается к MOEX ISS, требует сети",
 ]

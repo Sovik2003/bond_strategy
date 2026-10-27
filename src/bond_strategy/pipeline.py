@@ -1,205 +1,205 @@
-"""Конвейер: загрузка MOEX ISS -> нормализация -> снимок -> скринер.
+"""Конвейер: загрузка из ISS -> отбор -> нормализация -> скрининг -> отчёт.
 
-Снимок пишется в data/snapshots/<дата>/ и содержит как результат, так и
-перечень пробелов в данных. Скринер не должен получать «тихо подставленные»
-значения — только реальные или отсутствующие.
+Сеть используется только в fetch-слое. Всё остальное работает на
+переданных словарях, поэтому поддаётся офлайн-тестированию.
 """
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Any
 
-from .analytics.ofz_curve import benchmark_for, build_curve
-from .ingestion.http_client import FetchError, IssClient
+from .config import StrategyConfig
+from .ingestion.mapping import build_issue, load_issuers
 from .ingestion.moex import (
-    fetch_board_snapshot,
+    BOARD_CORP,
+    BOARD_OFZ,
+    IssClient,
+    fetch_board,
     fetch_bondization,
     fetch_description,
-    fetch_history,
-    fetch_ofz_snapshot,
-    select_eligible_securities,
+    num,
 )
-from .models import BondIssue, DataStatus
-from .normalization.enrichment import enrich_all, load_issuer_registry
-from .normalization.moex_bonds import NormalizationReport, build_bond_issue
-
-DEFAULT_SNAPSHOT_DIR = Path("data/snapshots")
-DEFAULT_REGISTRY = Path("config/issuers.json")
+from .models import BondIssue, SignalType
+from .portfolio.engine import Portfolio
+from .signals.generator import evaluate_issue
 
 
 @dataclass
-class IngestResult:
+class PipelineResult:
     as_of: date
-    bonds: list[BondIssue] = field(default_factory=list)
-    curve_points: int = 0
-    report: NormalizationReport = field(default_factory=NormalizationReport)
+    config_id: str
+    signals: list[dict] = field(default_factory=list)
+    summary: dict = field(default_factory=dict)
     errors: list[str] = field(default_factory=list)
-    snapshot_path: Path | None = None
-    enrichment: dict[str, int] = field(default_factory=dict)
-
-    def summary(self) -> dict[str, Any]:
-        return {
-            "as_of": self.as_of.isoformat(),
-            "bonds_loaded": len(self.bonds),
-            "ofz_curve_points": self.curve_points,
-            "skipped": len(self.report.skipped),
-            "skipped_reasons": _group_reasons(self.report.skipped),
-            "floating_coupon": self.report.floating_coupon,
-            "fx_issues": self.report.fx_issues,
-            "missing_rating": len(self.report.missing_rating),
-            "missing_industry": len(self.report.missing_industry),
-            "enrichment": self.enrichment,
-            "errors": self.errors[:20],
-        }
 
 
-def _group_reasons(skipped: list[tuple[str, str]]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for _, reason in skipped:
-        counts[reason] = counts.get(reason, 0) + 1
-    return dict(sorted(counts.items(), key=lambda kv: -kv[1]))
+def ofz_curve(client: IssClient) -> list[tuple[float, float]]:
+    """Кривая ОФЗ: (дюрация в годах, доходность долей).
+
+    Доходность из ISS приходит в процентах — переводим в доли.
+    """
+    rows = fetch_board(client, BOARD_OFZ)
+    points: list[tuple[float, float]] = []
+    for row in rows:
+        duration = num(row.get("DURATION"))
+        yld = num(row.get("YIELD"))
+        if duration and duration > 0 and yld and yld > 0:
+            points.append((duration / 365.0, yld / 100.0))
+    return sorted(points)
 
 
-def save_snapshot(result: IngestResult, directory: str | Path = DEFAULT_SNAPSHOT_DIR) -> Path:
-    folder = Path(directory) / result.as_of.isoformat()
-    folder.mkdir(parents=True, exist_ok=True)
-
-    payload = {
-        "summary": result.summary(),
-        "bonds": [
-            {
-                **{
-                    k: (v.isoformat() if isinstance(v, date) else v)
-                    for k, v in asdict(b).items()
-                    if k not in {"status", "amortization"}
-                },
-                "amortization": [
-                    {"date": p.payment_date.isoformat(), "share": p.share_of_nominal}
-                    for p in b.amortization
-                ],
-                "status": {k: v.value for k, v in b.status.items()},
-            }
-            for b in result.bonds
-        ],
-    }
-    path = folder / "bonds.json"
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    result.snapshot_path = path
-    return path
+def benchmark_ofz(points: list[tuple[float, float]], years: float | None) -> float | None:
+    """Линейная интерполяция по дюрации; за границами — крайние точки."""
+    if not points or years is None:
+        return None
+    if years <= points[0][0]:
+        return points[0][1]
+    if years >= points[-1][0]:
+        return points[-1][1]
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        if x0 <= years <= x1:
+            if x1 == x0:
+                return y0
+            return y0 + (y1 - y0) * (years - x0) / (x1 - x0)
+    return None
 
 
-def load_snapshot(path: str | Path) -> IngestResult:
-    """Восстановление ранее сохранённого снимка без обращения к сети."""
-    data = json.loads(Path(path).read_text(encoding="utf-8"))
-    as_of = date.fromisoformat(data["summary"]["as_of"])
-    bonds: list[BondIssue] = []
-
-    for raw in data.get("bonds", []):
-        fields = dict(raw)
-        fields.pop("amortization", None)
-        status = {k: DataStatus(v) for k, v in (fields.pop("status") or {}).items()}
-        for key in ("maturity_date", "price_date", "rating_date"):
-            if fields.get(key):
-                fields[key] = date.fromisoformat(fields[key])
-        bond = BondIssue(**fields, status=status)
-        bond.amortization = [
-            _amort(p) for p in raw.get("amortization", [])
-        ]
-        bonds.append(bond)
-
-    return IngestResult(as_of=as_of, bonds=bonds, snapshot_path=Path(path))
+def years_to_maturity(issue: BondIssue, as_of: date) -> float | None:
+    if issue.maturity_date is None:
+        return None
+    return max((issue.maturity_date - as_of).days, 0) / 365.0
 
 
-def _amort(raw: dict[str, Any]):
-    from .models import AmortizationPayment
+def preselect(rows: list[dict], as_of: date, cfg: StrategyConfig) -> list[dict]:
+    """Отсев до сетевых запросов: валюта, срок, уровень листинга.
 
-    return AmortizationPayment(date.fromisoformat(raw["date"]), raw["share"])
+    Детали запрашиваются только по прошедшим отсев — это экономит
+    сотни запросов к ISS.
+    """
+    max_level = int(cfg.get("filters", "max_list_level"))
+    max_years = float(cfg.get("filters", "preferred_max_years"))
+    min_days = int(cfg.get("filters", "min_days_to_maturity"))
+
+    selected = []
+    for row in rows:
+        if (row.get("FACEUNIT") or "SUR") not in ("SUR", "RUB"):
+            continue
+        maturity = row.get("MATDATE")
+        if not maturity:
+            continue
+        try:
+            mat = date.fromisoformat(maturity[:10])
+        except ValueError:
+            continue
+        days = (mat - as_of).days
+        if days < min_days:
+            continue
+        level = num(row.get("LISTLEVEL"))
+        if level and level > max_level:
+            continue
+        # Срок сильно за пределами горизонта: не тратим запросы
+        if days > max_years * 365 * 2:
+            continue
+        selected.append(row)
+    return selected
 
 
-def ingest_from_moex(
+def run_pipeline(
     as_of: date,
-    cfg=None,
-    client: IssClient | None = None,
-    max_candidates: int = 40,
-    min_turnover: float = 300_000.0,
-    history_days: int = 40,
-    save: bool = True,
-    registry_file: str | Path = DEFAULT_REGISTRY,
-    rating_max_age_days: int = 400,
-) -> IngestResult:
-    """Полный цикл загрузки. Ошибки отдельных выпусков не останавливают конвейер."""
-    client = client or IssClient()
-    result = IngestResult(as_of=as_of)
+    cfg: StrategyConfig,
+    client: IssClient,
+    issuers_path: str | Path = "config/issuers.json",
+    limit: int | None = None,
+) -> PipelineResult:
+    result = PipelineResult(as_of=as_of, config_id=cfg.config_id)
 
-    # 1. Кривая ОФЗ
-    curve = []
-    try:
-        ofz_rows = fetch_ofz_snapshot(client)
-        curve = build_curve(ofz_rows, as_of)
-        result.curve_points = len(curve)
-    except FetchError as exc:
-        result.errors.append(f"OFZ: {exc}")
+    issuers = load_issuers(issuers_path)
+    curve = ofz_curve(client)
 
-    # 2. Справочник корпоративных выпусков
-    try:
-        board = fetch_board_snapshot(client)
-    except FetchError as exc:
-        result.errors.append(f"BOARD: {exc}")
-        return result
+    rows = fetch_board(client, BOARD_CORP)
+    candidates = preselect(rows, as_of, cfg)
+    if limit is not None:
+        candidates = candidates[:limit]
 
-    marketdata = {r["SECID"]: r for r in board["marketdata"]}
-    candidates = select_eligible_securities(
-        board["securities"], marketdata, as_of, min_turnover, max_candidates
-    )
+    portfolio = Portfolio(cfg=cfg, cash=cfg.initial_capital)
+    issues: list[BondIssue] = []
 
-    # 3. Детализация по каждому кандидату
-    for security in candidates:
-        secid = security["SECID"]
+    for row in candidates:
+        secid = row["SECID"]
         try:
             description = fetch_description(client, secid)
             bondization = fetch_bondization(client, secid)
-            history = fetch_history(client, secid, as_of, history_days)
-        except FetchError as exc:
+        except Exception as exc:  # сеть или структура
             result.errors.append(f"{secid}: {exc}")
-            result.report.note_skip(secid, "ошибка загрузки")
             continue
 
-        benchmark = benchmark_for(curve, _to_date(description.get("MATDATE")), None, as_of)
-        issue = build_bond_issue(
-            security=security,
-            market=security.get("market", {}),
-            description=description,
-            bondization=bondization,
-            history=history,
-            ofz_yield=benchmark,
-            settlement=as_of,
-            report=result.report,
-        )
-        if issue is not None:
-            result.bonds.append(issue)
+        issue = build_issue(row, description, bondization, as_of, issuers, cfg)
+        if issue is None:
+            continue
 
-    # 4. Кредитное обогащение из отдельного справочника
-    registry_path = Path(registry_file)
-    if registry_path.exists():
-        registry = load_issuer_registry(registry_path)
-        result.bonds, result.enrichment = enrich_all(
-            result.bonds, registry, as_of, rating_max_age_days
-        )
-    else:
-        result.errors.append(f"REGISTRY: файл {registry_path} не найден")
+        years = years_to_maturity(issue, as_of)
+        issue.ofz_ytm = benchmark_ofz(curve, years)
+        issues.append(issue)
 
-    if save:
-        save_snapshot(result)
+    prices = {
+        i.isin: (i.clean_price, i.accrued_interest)
+        for i in issues
+        if i.clean_price is not None and i.accrued_interest is not None
+    }
+
+    for issue in issues:
+        signal = evaluate_issue(issue, portfolio, prices, as_of, cfg, cfg.broker_rate)
+        result.signals.append(
+            {
+                "isin": issue.isin,
+                "secid": issue.secid,
+                "issuer": issue.issuer_name,
+                "maturity": issue.maturity_date.isoformat() if issue.maturity_date else None,
+                "coupon_type": issue.coupon_type,
+                "clean_price": issue.clean_price,
+                "nkd": issue.accrued_interest,
+                "ofz_ytm": issue.ofz_ytm,
+                "signal": signal.signal_type.value,
+                "score": signal.score,
+                "suggested_amount": signal.suggested_amount,
+                "suggested_quantity": signal.suggested_quantity,
+                "reasons": signal.reasons,
+                "failed": signal.failed_conditions,
+            }
+        )
+
+    counts = {t.value: 0 for t in SignalType}
+    for s in result.signals:
+        counts[s["signal"]] += 1
+
+    result.summary = {
+        "as_of": as_of.isoformat(),
+        "config_id": cfg.config_id,
+        "board_rows": len(rows),
+        "preselected": len(candidates),
+        "evaluated": len(issues),
+        "ofz_points": len(curve),
+        "counts": counts,
+        "errors": len(result.errors),
+    }
     return result
 
 
-def _to_date(value: Any) -> date | None:
-    if not value:
-        return None
-    try:
-        return date.fromisoformat(str(value)[:10])
-    except ValueError:
-        return None
+def export(result: PipelineResult, path: str | Path) -> Path:
+    out = Path(path)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(
+        json.dumps(
+            {
+                "summary": result.summary,
+                "signals": result.signals,
+                "errors": result.errors,
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return out
