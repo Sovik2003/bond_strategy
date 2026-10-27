@@ -22,6 +22,7 @@ from ..config import StrategyConfig
 from ..models import AmortizationPayment, BondIssue, Quality
 from ..validation.freshness import apply_validation
 from .moex import coupon_type_from, dt, num
+from .ratings import Rating
 
 SENIOR_RATINGS = {"AAA", "AA+", "AA", "AA-", "A+", "A"}
 
@@ -99,10 +100,12 @@ def future_offer(bondization: dict[str, list[dict]], as_of: date) -> date | None
     return min(dates) if dates else None
 
 
-def quality_for(issuer: IssuerRecord | None) -> Quality:
-    if issuer is None or issuer.rating is None:
+def quality_for(issuer: IssuerRecord | None, rating: Rating | None = None) -> Quality:
+    """HIGH только при рейтинге не ниже A-. Источник рейтинга не важен."""
+    level = rating.level if rating else (issuer.rating if issuer else None)
+    if level is None:
         return Quality.MEDIUM
-    return Quality.HIGH if issuer.rating.upper() in SENIOR_RATINGS else Quality.MEDIUM
+    return Quality.HIGH if level.upper() in SENIOR_RATINGS else Quality.MEDIUM
 
 
 def price_date_for(row: dict) -> date | None:
@@ -130,6 +133,7 @@ def build_issue(
     as_of: date,
     issuers: dict[str, IssuerRecord],
     cfg: StrategyConfig,
+    rating: Rating | None = None,
 ) -> BondIssue | None:
     """None — если бумага заведомо не подходит: валюта или истёкший срок."""
     secid = row["SECID"]
@@ -180,10 +184,13 @@ def build_issue(
         qualified_only=description.get("ISQUALIFIEDINVESTORS") == "1",
         list_level=int(num(description.get("LISTLEVEL")) or 0) or None,
         min_lot=int(num(row.get("LOTSIZE")) or 1),
-        quality=quality_for(issuer),
-        rating=issuer.rating if issuer else None,
-        rating_agency=issuer.rating_agency if issuer else None,
-        rating_date=issuer.rating_date if issuer else None,
+        quality=quality_for(issuer, rating),
+        # Рейтинг из ISS (все четыре агентства) приоритетнее справочника:
+        # он приходит с датой и обновляется сам. Справочник нужен только
+        # для отрасли и отметки о раскрытии.
+        rating=(rating.level if rating else (issuer.rating if issuer else None)),
+        rating_agency=(rating.agency if rating else (issuer.rating_agency if issuer else None)),
+        rating_date=(rating.rating_date if rating else (issuer.rating_date if issuer else None)),
         reporting_sufficient=issuer.reporting_sufficient if issuer else False,
         clean_price=clean_price,
         accrued_interest=nkd,

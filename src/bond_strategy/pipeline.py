@@ -12,6 +12,7 @@ from pathlib import Path
 
 from .config import StrategyConfig
 from .ingestion.liquidity import liquidity_stats
+from .ingestion.ratings import fetch_company_ratings, pick_rating
 from .ingestion.mapping import build_issue, load_issuers
 from .ingestion.moex import (
     BOARD_CORP,
@@ -138,7 +139,14 @@ def run_pipeline(
             result.errors.append(f"{secid}: {exc}")
             continue
 
-        issue = build_issue(row, description, bondization, as_of, issuers, cfg)
+        emitter_id = description.get("EMITTER_ID")
+        try:
+            rating = pick_rating(fetch_company_ratings(client, emitter_id))
+        except Exception as exc:
+            result.errors.append(f"{secid} (рейтинг): {exc}")
+            rating = None
+
+        issue = build_issue(row, description, bondization, as_of, issuers, cfg, rating=rating)
         if issue is None:
             continue
 
@@ -179,6 +187,9 @@ def run_pipeline(
                 "avg_turnover": issue.avg_daily_turnover,
                 "turnover_days": issue.turnover_days,
                 "avg_spread": issue.avg_spread,
+                "rating": issue.rating,
+                "rating_agency": issue.rating_agency,
+                "rating_date": issue.rating_date.isoformat() if issue.rating_date else None,
                 "ofz_ytm": issue.ofz_ytm,
                 "signal": signal.signal_type.value,
                 "score": signal.score,
