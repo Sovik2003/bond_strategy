@@ -31,6 +31,9 @@ htmlcov/
 data/exports/*.json
 !data/exports/.gitkeep
 
+# Отчёты Streamlit-витрины (генерируются приложением)
+data/reports/
+
 # Редакторы и ОС
 .vscode/
 .idea/
