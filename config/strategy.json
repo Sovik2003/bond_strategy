@@ -7,7 +7,7 @@
   "limits": {
     "issuer_max_share": 0.25,
     "issue_max_share": 0.25,
-    "industry_max_share": 0.40,
+    "industry_max_share": 0.4,
     "medium_quality_max_share": 0.25
   },
   "filters": {
@@ -15,7 +15,7 @@
     "min_daily_turnover": 300000,
     "liquidity_history_days": 20,
     "max_spread_core": 0.005,
-    "max_spread_medium": 0.010,
+    "max_spread_medium": 0.01,
     "min_days_to_maturity": 180,
     "preferred_max_years": 3,
     "max_list_level": 2
@@ -27,11 +27,10 @@
     "duplicate_cooldown_days": 5
   },
   "scoring_weights": {
-    "credit": 0.35,
-    "financial": 0.20,
-    "yield": 0.20,
-    "liquidity": 0.15,
-    "structure": 0.10
+    "credit": 0.4375,
+    "yield": 0.25,
+    "liquidity": 0.1875,
+    "structure": 0.125
   },
   "freshness": {
     "price_max_age_days": 3,

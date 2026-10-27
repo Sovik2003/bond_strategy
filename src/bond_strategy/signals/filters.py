@@ -42,8 +42,6 @@ def hard_filter(issue: BondIssue, as_of: date, cfg: StrategyConfig) -> FilterRes
         result.fail("EXCLUDED_COUPON_TYPE", f"Тип купона: {issue.coupon_type}")
     if issue.qualified_only:
         result.fail("EXCLUDED_QUALIFIED_ONLY", "Только для квалифицированных инвесторов")
-    if not issue.reporting_sufficient:
-        result.fail("EXCLUDED_REPORTING", "Раскрытие не проверено")
     if issue.rating is None:
         result.fail("EXCLUDED_NO_RATING", "Нет рейтинга в справочнике")
 

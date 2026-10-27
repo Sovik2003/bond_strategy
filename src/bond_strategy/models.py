@@ -95,7 +95,6 @@ class BondIssue:
     rating_date: Optional[date] = None
     default_flag: bool = False
     restructuring_flag: bool = False
-    reporting_sufficient: bool = False
 
     # рыночные данные
     clean_price: Optional[float] = None
@@ -108,10 +107,6 @@ class BondIssue:
 
     # фактический график купонов из ISS: [(дата выплаты, руб. на бумагу)]
     coupon_schedule: list[tuple[date, float]] = field(default_factory=list)
-
-    # финансовые метрики
-    net_debt_to_ebitda: Optional[float] = None
-    interest_coverage: Optional[float] = None
 
     status: dict[str, DataStatus] = field(default_factory=dict)
 

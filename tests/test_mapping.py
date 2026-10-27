@@ -208,7 +208,6 @@ def test_missing_rating_leaves_none(description, bondization, cfg):
     row = {"SECID": "RU000A10FEP7", "PREVPRICE": 99.89, "ACCRUEDINT": 0.75, "LOTSIZE": 1}
     issue = build_issue(row, description, bondization, date(2026, 10, 26), {}, cfg)
     assert issue.rating is None
-    assert issue.reporting_sufficient is False
     assert issue.quality is Quality.MEDIUM
 
 
@@ -223,7 +222,6 @@ def test_rating_from_directory(description, bondization, cfg):
             rating="A+",
             rating_agency="АКРА",
             rating_date=date(2026, 6, 1),
-            reporting_sufficient=True,
         )
     }
     row = {"SECID": "RU000A10FEP7", "PREVPRICE": 99.89, "ACCRUEDINT": 0.75, "LOTSIZE": 1}

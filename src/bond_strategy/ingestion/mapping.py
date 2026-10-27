@@ -35,7 +35,6 @@ class IssuerRecord:
     rating: str | None
     rating_agency: str | None
     rating_date: date | None
-    reporting_sufficient: bool
 
 
 def load_issuers(path: str | Path) -> dict[str, IssuerRecord]:
@@ -50,7 +49,6 @@ def load_issuers(path: str | Path) -> dict[str, IssuerRecord]:
             rating=item.get("rating"),
             rating_agency=item.get("rating_agency"),
             rating_date=dt(item.get("rating_date")),
-            reporting_sufficient=bool(item.get("reporting_sufficient", False)),
         )
     return records
 
@@ -191,7 +189,6 @@ def build_issue(
         rating=(rating.level if rating else (issuer.rating if issuer else None)),
         rating_agency=(rating.agency if rating else (issuer.rating_agency if issuer else None)),
         rating_date=(rating.rating_date if rating else (issuer.rating_date if issuer else None)),
-        reporting_sufficient=issuer.reporting_sufficient if issuer else False,
         clean_price=clean_price,
         accrued_interest=nkd,
         price_date=price_date,

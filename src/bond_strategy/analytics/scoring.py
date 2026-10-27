@@ -24,28 +24,6 @@ def credit_score(issue: BondIssue) -> float:
     return float(RATING_SCALE.get(issue.rating.upper(), 20))
 
 
-def financial_score(issue: BondIssue) -> float:
-    """По метрикам эмитента. Если метрик нет — осторожный прокси, не выше 55."""
-    if not issue.reporting_sufficient:
-        return 0.0
-    if issue.default_flag or issue.restructuring_flag:
-        return 0.0
-
-    nd = issue.net_debt_to_ebitda
-    ic = issue.interest_coverage
-    if nd is None and ic is None:
-        return 55.0
-
-    parts: list[float] = []
-    if nd is not None:
-        # 0x -> 100, 2x -> 75, 4x -> 50, 6x -> 25, >=8x -> 0
-        parts.append(_clamp(100 - 12.5 * max(nd, 0.0)))
-    if ic is not None:
-        # 1x -> 20, 3x -> 60, 5x -> 90, >=6x -> 100
-        parts.append(_clamp(20 * (ic - 1) + 20))
-    return sum(parts) / len(parts)
-
-
 def yield_score(issue: BondIssue, premium: float | None, cfg: StrategyConfig) -> float:
     """Порог премии = 50 баллов, двойная премия = 100."""
     if premium is None:
@@ -90,13 +68,27 @@ def structure_score(issue: BondIssue, settlement: date, cfg: StrategyConfig) -> 
 def total_score(
     issue: BondIssue, settlement: date, premium: float | None, cfg: StrategyConfig
 ) -> tuple[float, dict[str, float]]:
+    """Взвешенная сумма компонентов, нормированная на сумму весов.
+
+    Нормировка обязательна: если в конфигурации набор весов неполный, сумма
+    окажется меньше единицы, и балл молча занизится — порог BUY станет
+    недостижим без всякой причины. Делим на фактическую сумму весов, а не
+    полагаемся на то, что она равна единице.
+
+    Компонента financial здесь нет: чистый долг/EBITDA и покрытие процентов
+    ниоткуда не загружаются, поэтому 20% веса считались бы по константе.
+    Кредитное качество эмитента измеряется рейтингом (вес credit).
+    """
     components = {
         "credit": credit_score(issue),
-        "financial": financial_score(issue),
         "yield": yield_score(issue, premium, cfg),
         "liquidity": liquidity_score(issue, cfg),
         "structure": structure_score(issue, settlement, cfg),
     }
-    weights = cfg.get("scoring_weights", default={})
-    total = sum(components[k] * float(weights.get(k, 0.0)) for k in components)
+    weights = cfg.get("scoring_weights", default={}) or {}
+    total_weight = sum(float(weights.get(k, 0.0)) for k in components)
+    if total_weight <= 0:
+        # Весов нет вовсе — честнее вернуть ноль, чем выдумать пропорции.
+        return 0.0, components
+    total = sum(components[k] * float(weights.get(k, 0.0)) for k in components) / total_weight
     return round(total, 2), components

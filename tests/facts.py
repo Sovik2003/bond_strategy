@@ -35,7 +35,6 @@ def normal() -> BondIssue:
         rating="A+",
         rating_agency="АКРА",
         rating_date=date(2026, 6, 1),
-        reporting_sufficient=True,
         quality=Quality.HIGH,
         list_level=1,
         clean_price=98.5,
@@ -44,8 +43,6 @@ def normal() -> BondIssue:
         avg_daily_turnover=2_000_000.0,
         avg_spread=0.002,
         ofz_ytm=0.135,
-        net_debt_to_ebitda=2.0,
-        interest_coverage=4.0,
         status=_all_fresh(),
     )
 
@@ -121,8 +118,6 @@ def medium_quality() -> BondIssue:
     b.rating = "BBB-"
     b.quality = Quality.MEDIUM
     b.clean_price = 96.0
-    b.net_debt_to_ebitda = 3.5
-    b.interest_coverage = 2.5
     return b
 
 
@@ -131,7 +126,6 @@ def no_rating() -> BondIssue:
     b.isin, b.secid, b.issuer_id = "RU000TEST0011", "TEST11", "ISS_K"
     b.rating = None
     b.rating_date = None
-    b.reporting_sufficient = False
     return b
 
 
