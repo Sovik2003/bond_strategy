@@ -11,22 +11,17 @@ from datetime import date
 from pathlib import Path
 
 from .config import StrategyConfig
-from .ingestion.liquidity import liquidity_stats
-from .ingestion.ratings import fetch_company_ratings, pick_rating
-from .ingestion.mapping import build_issue, load_issuers
 from .ingestion.moex import (
     BOARD_CORP,
     BOARD_OFZ,
     IssClient,
     fetch_board,
-    fetch_bondization,
-    fetch_description,
     num,
 )
 from .models import BondIssue, SignalType
-from .validation.freshness import apply_validation
 from .portfolio.engine import Portfolio
 from .signals.generator import evaluate_issue
+from .universe import UniverseStats, build_universe, screen
 
 
 @dataclass
@@ -75,97 +70,44 @@ def years_to_maturity(issue: BondIssue, as_of: date) -> float | None:
     return max((issue.maturity_date - as_of).days, 0) / 365.0
 
 
-def preselect(rows: list[dict], as_of: date, cfg: StrategyConfig) -> list[dict]:
-    """Отсев до сетевых запросов: валюта, срок, уровень листинга.
-
-    Детали запрашиваются только по прошедшим отсев — это экономит
-    сотни запросов к ISS.
-    """
-    max_level = int(cfg.get("filters", "max_list_level"))
-    max_years = float(cfg.get("filters", "preferred_max_years"))
-    min_days = int(cfg.get("filters", "min_days_to_maturity"))
-
-    selected = []
-    for row in rows:
-        if (row.get("FACEUNIT") or "SUR") not in ("SUR", "RUB"):
-            continue
-        maturity = row.get("MATDATE")
-        if not maturity:
-            continue
-        try:
-            mat = date.fromisoformat(maturity[:10])
-        except ValueError:
-            continue
-        days = (mat - as_of).days
-        if days < min_days:
-            continue
-        level = num(row.get("LISTLEVEL"))
-        if level and level > max_level:
-            continue
-        # Срок сильно за пределами горизонта: не тратим запросы
-        if days > max_years * 365 * 2:
-            continue
-        selected.append(row)
-    return selected
-
-
 def run_pipeline(
     as_of: date,
     cfg: StrategyConfig,
     client: IssClient,
     issuers_path: str | Path = "config/issuers.json",
-    limit: int | None = None,
+    top: int | None = None,
+    workers: int = 6,
+    enrich_limit: int | None = None,
 ) -> PipelineResult:
+    """Полный прогон: борда -> отсев -> обогащение -> ранжирование -> сигналы.
+
+    Порядок важен. Сначала строится ВЕСЬ юниверсум, прошедший критерии, и
+    только потом он ранжируется по баллу. Прежний параметр limit брал первые
+    N строк борды, а порядок там произволен: в прогон попадали мелкие бумаги
+    с начала списка, а ликвидные не попадали вовсе. Из-за этого отказы по
+    ликвидности составляли 11 из 14 — это был артефакт выборки, а не рынка.
+
+    top — сколько лучших оставить в отчёте ПОСЛЕ ранжирования.
+    enrich_limit — техническое ограничение на число обогащаемых выпусков,
+    для быстрых проверок. На смысл не влияет: ранжирование всё равно по баллу.
+    """
     result = PipelineResult(as_of=as_of, config_id=cfg.config_id)
 
-    issuers = load_issuers(issuers_path)
-    window_days = int(cfg.get("filters", "liquidity_history_days", default=20))
     curve = ofz_curve(client)
-
     rows = fetch_board(client, BOARD_CORP)
-    candidates = preselect(rows, as_of, cfg)
-    if limit is not None:
-        candidates = candidates[:limit]
 
-    portfolio = Portfolio(cfg=cfg, cash=cfg.initial_capital)
-    issues: list[BondIssue] = []
+    candidates, stats = screen(rows, as_of, cfg)
+    if enrich_limit is not None:
+        candidates = candidates[:enrich_limit]
 
-    for row in candidates:
-        secid = row["SECID"]
-        try:
-            description = fetch_description(client, secid)
-            bondization = fetch_bondization(client, secid)
-        except Exception as exc:  # сеть или структура
-            result.errors.append(f"{secid}: {exc}")
-            continue
+    issues, stats, errors = build_universe(
+        client, candidates, as_of, cfg, str(issuers_path), workers=workers, stats=stats
+    )
+    result.errors.extend(errors)
 
-        emitter_id = description.get("EMITTER_ID")
-        try:
-            rating = pick_rating(fetch_company_ratings(client, emitter_id))
-        except Exception as exc:
-            result.errors.append(f"{secid} (рейтинг): {exc}")
-            rating = None
-
-        issue = build_issue(row, description, bondization, as_of, issuers, cfg, rating=rating)
-        if issue is None:
-            continue
-
-        try:
-            turnover, days = liquidity_stats(client, secid, as_of, window_days)
-            issue.avg_daily_turnover = turnover
-            issue.turnover_days = days
-        except Exception as exc:
-            result.errors.append(f"{secid} (история): {exc}")
-            issue.avg_daily_turnover = None
-            issue.turnover_days = 0
-
-        # Статусы зависят от liq, поэтому валидация повторяется после
-        # заполнения оборота.
-        apply_validation(issue, as_of, cfg)
-
-        years = years_to_maturity(issue, as_of)
-        issue.ofz_ytm = benchmark_ofz(curve, years)
-        issues.append(issue)
+    # Бенчмарк ОФЗ считается после обогащения: для него нужен срок до погашения.
+    for issue in issues:
+        issue.ofz_ytm = benchmark_ofz(curve, years_to_maturity(issue, as_of))
 
     prices = {
         i.isin: (i.clean_price, i.accrued_interest)
@@ -173,10 +115,28 @@ def run_pipeline(
         if i.clean_price is not None and i.accrued_interest is not None
     }
 
-    for issue in issues:
-        signal = evaluate_issue(issue, portfolio, prices, as_of, cfg, cfg.broker_rate)
+    portfolio = Portfolio(cfg=cfg, cash=cfg.initial_capital)
+    evaluated = [
+        (issue, evaluate_issue(issue, portfolio, prices, as_of, cfg, cfg.broker_rate))
+        for issue in issues
+    ]
+
+    # Ранжирование: лучшие по баллу первыми. При равном балле — по убыванию
+    # ликвидности, затем по secid, чтобы порядок не зависел от выдачи ISS.
+    evaluated.sort(
+        key=lambda pair: (
+            -pair[1].score,
+            -(pair[0].avg_daily_turnover or 0.0),
+            pair[0].secid,
+        )
+    )
+
+    ranked = evaluated[:top] if top is not None else evaluated
+
+    for rank, (issue, signal) in enumerate(ranked, start=1):
         result.signals.append(
             {
+                "rank": rank,
                 "isin": issue.isin,
                 "secid": issue.secid,
                 "issuer": issue.issuer_name,
@@ -207,10 +167,10 @@ def run_pipeline(
     result.summary = {
         "as_of": as_of.isoformat(),
         "config_id": cfg.config_id,
-        "board_rows": len(rows),
-        "preselected": len(candidates),
-        "evaluated": len(issues),
         "ofz_points": len(curve),
+        "universe": stats.as_dict(),
+        "ranked_total": len(evaluated),
+        "reported": len(result.signals),
         "counts": counts,
         "errors": len(result.errors),
     }
