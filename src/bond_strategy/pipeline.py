@@ -11,6 +11,7 @@ from datetime import date
 from pathlib import Path
 
 from .config import StrategyConfig
+from .ingestion.liquidity import liquidity_stats
 from .ingestion.mapping import build_issue, load_issuers
 from .ingestion.moex import (
     BOARD_CORP,
@@ -22,6 +23,7 @@ from .ingestion.moex import (
     num,
 )
 from .models import BondIssue, SignalType
+from .validation.freshness import apply_validation
 from .portfolio.engine import Portfolio
 from .signals.generator import evaluate_issue
 
@@ -116,6 +118,7 @@ def run_pipeline(
     result = PipelineResult(as_of=as_of, config_id=cfg.config_id)
 
     issuers = load_issuers(issuers_path)
+    window_days = int(cfg.get("filters", "liquidity_history_days", default=20))
     curve = ofz_curve(client)
 
     rows = fetch_board(client, BOARD_CORP)
@@ -139,6 +142,19 @@ def run_pipeline(
         if issue is None:
             continue
 
+        try:
+            turnover, days = liquidity_stats(client, secid, as_of, window_days)
+            issue.avg_daily_turnover = turnover
+            issue.turnover_days = days
+        except Exception as exc:
+            result.errors.append(f"{secid} (история): {exc}")
+            issue.avg_daily_turnover = None
+            issue.turnover_days = 0
+
+        # Статусы зависят от liq, поэтому валидация повторяется после
+        # заполнения оборота.
+        apply_validation(issue, as_of, cfg)
+
         years = years_to_maturity(issue, as_of)
         issue.ofz_ytm = benchmark_ofz(curve, years)
         issues.append(issue)
@@ -160,6 +176,9 @@ def run_pipeline(
                 "coupon_type": issue.coupon_type,
                 "clean_price": issue.clean_price,
                 "nkd": issue.accrued_interest,
+                "avg_turnover": issue.avg_daily_turnover,
+                "turnover_days": issue.turnover_days,
+                "avg_spread": issue.avg_spread,
                 "ofz_ytm": issue.ofz_ytm,
                 "signal": signal.signal_type.value,
                 "score": signal.score,

@@ -102,6 +102,7 @@ class BondIssue:
     accrued_interest: Optional[float] = None
     price_date: Optional[date] = None
     avg_daily_turnover: Optional[float] = None
+    turnover_days: int = 0  # сколько торговых дней учтено в среднем
     avg_spread: Optional[float] = None
     ofz_ytm: Optional[float] = None
 

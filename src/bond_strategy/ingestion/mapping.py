@@ -188,7 +188,11 @@ def build_issue(
         clean_price=clean_price,
         accrued_interest=nkd,
         price_date=price_date,
-        avg_daily_turnover=num(row.get("VALTODAY")),
+        # VALTODAY — оборот текущей сессии, а не средний. При расчёте на
+        # прошлую дату он ноль и отсекает всё подряд. Средний оборот
+        # считается из истории в ingestion/liquidity.py и проставляется
+        # конвейером после сборки.
+        avg_daily_turnover=None,
         avg_spread=spread,
         coupon_schedule=future_coupons(bondization, as_of),
     )
