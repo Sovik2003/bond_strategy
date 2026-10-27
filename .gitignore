@@ -1,0 +1,37 @@
+# Секреты и окружение
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Сырые ответы ISS: 78 МБ, воспроизводимы повторной загрузкой
+data/raw/
+data/backups/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Тесты и кэш
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Локальная база и выгрузки
+*.db
+*.sqlite3
+data/exports/*.json
+!data/exports/.gitkeep
+
+# Редакторы и ОС
+.vscode/
+.idea/
+.DS_Store

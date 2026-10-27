@@ -1,0 +1,15 @@
+{
+  "_comment": "Справочник эмитентов. Заполняется вручную или из отдельного источника рейтингов. Пустой справочник — валидное состояние: тогда ни один выпуск не получит BUY, и это корректное поведение, а не сбой.",
+  "_schema": {
+    "emitter_id": "MOEX EMITTER_ID из description",
+    "name": "название эмитента",
+    "industry": "отрасль",
+    "rating": "AAA | AA+ | AA | AA- | A+ | A | A- | BBB+ | BBB | BBB- | BB+ | ... либо null",
+    "rating_agency": "АКРА | Эксперт РА | НКР | НРА | null",
+    "rating_date": "YYYY-MM-DD — дата действия рейтинга",
+    "reporting_sufficient": "true только если раскрытие проверено",
+    "source": "откуда взяты данные",
+    "updated_at": "YYYY-MM-DD"
+  },
+  "issuers": []
+}

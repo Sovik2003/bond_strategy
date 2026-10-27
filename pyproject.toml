@@ -1,0 +1,31 @@
+[project]
+name = "bond-strategy"
+version = "0.2.0"
+description = "Аналитическое ядро облигационной стратегии: MOEX ISS, скринер, сигналы, модельный портфель"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+bond-strategy = "bond_strategy.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = "-q"
+markers = [
+    "slow: обращается к сети MOEX ISS, выполняется дольше",
+    "network: требует доступности внешних источников",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]

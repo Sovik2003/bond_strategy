@@ -1,0 +1,44 @@
+{
+  "version": "1.1.0",
+  "capital": {
+    "initial": 50000,
+    "reserve_base": 10000,
+    "reserve_conservative": 20000,
+    "reserve_income": 8000
+  },
+  "limits": {
+    "issuer_max_share": 0.25,
+    "issue_max_share": 0.25,
+    "industry_max_share": 0.4,
+    "medium_quality_max_share": 0.25,
+    "max_long_maturity_share": 0.2
+  },
+  "filters": {
+    "min_position": 8000,
+    "min_daily_turnover": 300000,
+    "max_spread_core": 0.005,
+    "max_spread_medium": 0.01,
+    "min_days_to_maturity": 180,
+    "preferred_min_days": 270,
+    "preferred_max_years": 3,
+    "max_bonds_total": 0
+  },
+  "signals": {
+    "min_buy_score": 80,
+    "core_premium_min": 0.01,
+    "medium_premium_min": 0.02,
+    "duplicate_cooldown_days": 5
+  },
+  "scoring_weights": {
+    "credit": 0.35,
+    "financial": 0.2,
+    "yield": 0.2,
+    "liquidity": 0.15,
+    "structure": 0.1
+  },
+  "freshness": {
+    "price_max_age_days": 2,
+    "rating_max_age_days": 400,
+    "turnover_max_age_days": 5
+  }
+}
