@@ -18,7 +18,8 @@ from .ingestion.moex import (
     fetch_board,
     num,
 )
-from .models import BondIssue, SignalType
+from .models import BondIssue, Position, Quality, SignalType
+from math import isfinite
 from .portfolio.engine import Portfolio
 from .signals.generator import evaluate_issue
 from .universe import UniverseStats, build_universe, screen
@@ -78,6 +79,8 @@ def run_pipeline(
     top: int | None = None,
     workers: int = 6,
     enrich_limit: int | None = None,
+    cash: float | None = None,
+    holdings: list[dict] | None = None,
 ) -> PipelineResult:
     """Полный прогон: борда -> отсев -> обогащение -> ранжирование -> сигналы.
 
@@ -115,7 +118,64 @@ def run_pipeline(
         if i.clean_price is not None and i.accrued_interest is not None
     }
 
-    portfolio = Portfolio(cfg=cfg, cash=cfg.initial_capital)
+    portfolio = Portfolio(cfg=cfg, cash=cfg.initial_capital if cash is None else float(cash))
+    if not isfinite(portfolio.cash) or portfolio.cash < 0:
+        raise ValueError("Свободные деньги должны быть неотрицательным числом")
+    if holdings:
+        # Holdings are resolved independently of the screener and enrichment limit.
+        # Values are manually entered total RUB values including accrued interest.
+        board_index = {}
+        for row in rows:
+            for key in ("SECID", "ISIN"):
+                if row.get(key):
+                    board_index[str(row[key]).strip().upper()] = row
+        selected, seen, resolved = [], set(), {}
+        for holding in holdings:
+            secid = str(holding.get("secid") or "").strip().upper()
+            qty = holding.get("quantity")
+            value = holding.get("market_value")
+            if (not secid or secid in seen or isinstance(qty, bool)
+                or not isinstance(qty, int) or qty <= 0
+                or isinstance(value, bool) or not isinstance(value, (float, int))
+                or not isfinite(value) or value <= 0):
+                raise ValueError(f"Некорректная или повторная позиция: {secid or 'пустой SECID'}")
+            if secid not in board_index:
+                raise ValueError(f"Позиция {secid} не найдена на борде TQCB; расчёт остановлен")
+            row = board_index[secid]
+            actual_secid = str(row["SECID"]).strip().upper()
+            if actual_secid in seen:
+                raise ValueError(f"Одна облигация введена несколько раз: {secid}")
+            selected.append(row)
+            seen.add(actual_secid)
+            resolved[secid] = actual_secid
+        held_issues, _, held_errors = build_universe(
+            client, selected, as_of, cfg, str(issuers_path), workers=workers
+        )
+        held_by_secid = {i.secid.upper(): i for i in held_issues}
+        missing = seen - held_by_secid.keys()
+        if missing:
+            raise ValueError("Не удалось загрузить позиции: " + ", ".join(sorted(missing))
+                             + (". " + "; ".join(held_errors) if held_errors else ""))
+        for holding in holdings:
+            issue = held_by_secid[resolved[holding["secid"].strip().upper()]]
+            if not issue.issuer_id or issue.issuer_id == issue.secid:
+                raise ValueError(f"Не определён эмитент {issue.secid}; расчёт остановлен")
+            if issue.isin in portfolio.positions:
+                raise ValueError(f"Одна облигация введена несколько раз: {issue.isin}")
+            value = float(holding["market_value"])
+            portfolio.positions[issue.isin] = Position(
+                isin=issue.isin, quantity=holding["quantity"],
+                nominal_outstanding=issue.nominal, purchase_cost=value,
+                clean_price=0.0, accrued_interest=0.0,
+            )
+            portfolio.issuer_by_isin[issue.isin] = issue.issuer_id
+            portfolio.industry_by_isin[issue.isin] = issue.industry
+            # An absent rating must not silently reduce medium-quality exposure.
+            portfolio.quality_by_isin[issue.isin] = issue.quality if issue.rating else Quality.MEDIUM
+            # Force the engine to use the entered full market value, not a quote
+            # with potentially incompatible accrued-interest units.
+            prices.pop(issue.isin, None)
+        result.errors.extend(held_errors)
     evaluated = [
         (issue, evaluate_issue(issue, portfolio, prices, as_of, cfg, cfg.broker_rate))
         for issue in issues
@@ -173,6 +233,12 @@ def run_pipeline(
         "reported": len(result.signals),
         "counts": counts,
         "errors": len(result.errors),
+        "portfolio": {
+            "cash": portfolio.cash,
+            "bonds_value": portfolio.bonds_value(prices),
+            "total_value": portfolio.total_value(prices),
+            "holdings": holdings or [],
+        },
     }
     return result
 

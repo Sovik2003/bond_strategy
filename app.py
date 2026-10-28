@@ -1,7 +1,7 @@
 """Streamlit-витрина над аналитическим ядром bond_strategy.
 
 Приложение только читает и считает: заявки на биржу не отправляются,
-config/strategy.json на диске не изменяется, src/bond_strategy не трогается.
+config/strategy.json на диске не изменяется.
 
 Запуск:
     PYTHONPATH=src streamlit run app.py
@@ -15,6 +15,9 @@ from datetime import date
 from pathlib import Path
 
 import streamlit as st
+import pandas as pd
+
+from portfolio_inputs import load_portfolio, save_portfolio, validate_portfolio
 
 from bond_strategy.config import StrategyConfig, load_config
 from bond_strategy.ingestion.moex import IssClient, IssError
@@ -22,6 +25,7 @@ from bond_strategy.pipeline import export, run_pipeline
 
 CONFIG_PATH = Path("config/strategy.json")
 REPORT_PATH = Path("data/reports/report.json")
+PORTFOLIO_PATH = Path("data/portfolio.json")
 
 MIN_CAPITAL = 1_000
 DEFAULT_CAPITAL = 50_000
@@ -87,7 +91,7 @@ def scale_config(cfg: StrategyConfig, amount: float) -> StrategyConfig:
 # --------------------------------------------------------------------------
 
 @st.cache_data(show_spinner=False)
-def run_cached(as_of_iso: str, capital: float, enrich_limit: int | None, workers: int):
+def run_cached(as_of_iso: str, capital: float, enrich_limit: int | None, workers: int, cash: float, positions: tuple):
     """Полный прогон под кэш. IssClient создаётся внутри — он не хешируется."""
     cfg = scale_config(load_config(CONFIG_PATH), capital)
     client = IssClient(raw_root="data/raw")
@@ -98,6 +102,8 @@ def run_cached(as_of_iso: str, capital: float, enrich_limit: int | None, workers
         top=None,
         workers=workers,
         enrich_limit=enrich_limit,
+        cash=cash,
+        holdings=[{"secid": s, "quantity": q, "market_value": v} for s, q, v in positions],
     )
 
 
@@ -133,18 +139,50 @@ def fmt_text(value) -> str:
 
 st.set_page_config(page_title="bond_strategy", page_icon="📊", layout="wide")
 
+if "portfolio_snapshot" not in st.session_state:
+    try:
+        st.session_state["portfolio_snapshot"] = load_portfolio(PORTFOLIO_PATH)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        st.error(f"Не удалось прочитать сохранённый портфель: {exc}. Файл не изменён.")
+        st.stop()
+
+st.title("bond_strategy")
+st.subheader("Купленные позиции")
+st.caption("Введите SECID с борда TQCB, количество бумаг и текущую стоимость всей позиции в рублях с НКД. Цены нужно обновлять вручную. Сохранение — только на этом компьютере.")
+with st.form("portfolio_form"):
+    saved = st.session_state["portfolio_snapshot"]
+    free_cash = st.number_input("Свободные деньги, ₽", min_value=0.0, value=float(saved["cash"]), step=1000.0)
+    frame = pd.DataFrame(saved["positions"], columns=["secid", "quantity", "market_value"])
+    editor = st.data_editor(
+        frame, num_rows="dynamic", hide_index=True, width="stretch",
+        column_config={
+            "secid": st.column_config.TextColumn("SECID / ISIN", required=True),
+            "quantity": st.column_config.NumberColumn("Количество, шт.", min_value=1, step=1, required=True),
+            "market_value": st.column_config.NumberColumn("Стоимость позиции с НКД, ₽", min_value=0.01, step=100.0, required=True),
+        },
+    )
+    saved_clicked = st.form_submit_button("Сохранить портфель")
+if saved_clicked:
+    try:
+        snapshot = validate_portfolio(free_cash, editor.to_dict("records"))
+        save_portfolio(PORTFOLIO_PATH, snapshot)
+        st.session_state["portfolio_snapshot"] = snapshot
+        st.success("Портфель сохранён. Запустите расчёт, чтобы учесть изменения.")
+    except (ValueError, OSError) as exc:
+        st.error(f"Портфель не сохранён: {exc}")
+
+snapshot = st.session_state["portfolio_snapshot"]
+capital = snapshot["cash"] + sum(p["market_value"] for p in snapshot["positions"])
+st.metric("Сумма портфеля: облигации с НКД + свободные деньги", fmt_rub(capital))
+st.caption("Изменения в форме применяются только после нажатия «Сохранить портфель». Расчёт использует сохранённые данные.")
+if snapshot["positions"]:
+    st.warning("Стоимость позиций введена вручную и не обновляется автоматически. Проверьте её на дату расчёта. Без рейтинга используется среднее качество. Если отрасль не определена, отраслевой лимит может быть неполным — проверьте его вручную.")
+
 with st.sidebar:
     st.header("Параметры прогона")
 
-    capital = st.number_input(
-        "Сумма портфеля, ₽",
-        min_value=0,
-        max_value=100_000_000,
-        value=DEFAULT_CAPITAL,
-        step=1_000,
-        help="Капитал прогона. Резерв (20%) и минимальная позиция (16%) "
-             "масштабируются пропорционально и в конфиг на диске не пишутся.",
-    )
+    st.metric("Сумма портфеля, ₽", fmt_rub(capital))
+    st.caption("Облигации с НКД + свободные деньги; ввод — в форме портфеля.")
 
     as_of = st.date_input("Дата расчёта", value=date.today())
 
@@ -185,13 +223,14 @@ if run_clicked:
 
     try:
         with st.spinner("Идёт прогон: борда → отсев → обогащение → ранжирование…"):
-            result = run_cached(as_of.isoformat(), float(capital), enrich_limit, workers)
+            result = run_cached(as_of.isoformat(), float(capital), enrich_limit, workers,
+                                snapshot["cash"], tuple((p["secid"], p["quantity"], p["market_value"]) for p in snapshot["positions"]))
     except IssError as exc:
         st.error(f"MOEX ISS недоступен: {exc}")
         st.info("Проверьте сеть и повторите запуск. Уже загруженные данные остались в кэше.")
         st.stop()
     except ValueError as exc:
-        st.error(f"Проверьте сумму портфеля: {exc}")
+        st.error(f"Проверьте данные портфеля или параметры расчёта: {exc}")
         st.stop()
     except Exception as exc:  # noqa: BLE001 — UI не должен падать трейсбеком
         st.error(f"Прогон не удался: {type(exc).__name__}: {exc}")
@@ -200,17 +239,19 @@ if run_clicked:
     st.session_state["result"] = result
     st.session_state["capital"] = float(capital)
     st.session_state["cfg"] = cfg_preview
+    st.session_state["run_snapshot"] = copy.deepcopy(snapshot)
 
 
 result = st.session_state.get("result")
 
-st.title("bond_strategy")
 st.caption("Кандидаты в портфель корпоративных облигаций по данным MOEX ISS")
 
 if result is None:
     st.info("Задайте параметры в боковой панели и нажмите «Запустить».")
     st.stop()
 
+if st.session_state.get("run_snapshot") != snapshot:
+    st.warning("Портфель изменён после последнего расчёта. Результаты ниже относятся к предыдущему составу — запустите расчёт заново.")
 used_capital = st.session_state.get("capital", float(capital))
 signals = result.signals or []
 summary = result.summary or {}
@@ -289,7 +330,7 @@ buy_total = sum(float(s.get("suggested_amount") or 0) for s in buy_signals)
 st.divider()
 st.subheader("Кандидаты")
 st.caption(
-    "Размер позиции рассчитан от пустого портфеля. Одновременно исполнить все "
+    "Размер позиции рассчитан с учётом сохранённого портфеля. Одновременно исполнить все "
     "сигналы нельзя — конвейер не применяет сделки последовательно."
 )
 
@@ -298,16 +339,11 @@ if buy_signals:
     cols = st.columns(3)
     cols[0].metric("Сигналов BUY", fmt_num(len(buy_signals)))
     cols[1].metric("Сумма suggested_amount", fmt_rub(buy_total))
-    cols[2].metric(
-        "К капиталу",
-        f"×{fmt_num(overhang, 1)}",
-        delta=f"превышение {fmt_rub(buy_total - used_capital)}",
-        delta_color="inverse",
-    )
+    cols[2].metric("К капиталу", f"×{fmt_num(overhang, 1)}")
     st.error(
         f"Сумма всех предложенных позиций — {fmt_rub(buy_total)} при капитале "
-        f"{fmt_rub(used_capital)}, то есть в {fmt_num(overhang, 1)} раза больше. "
-        "`suggested_amount` — размер позиции «как если бы портфель был пуст», "
+        f"{fmt_rub(used_capital)} (отношение ×{fmt_num(overhang, 1)}). "
+        "`suggested_amount` рассчитан для каждого выпуска отдельно от текущего портфеля, "
         "а не исполнимая заявка: ядро оценивает каждый выпуск против одного и "
         "того же портфеля и не расходует кэш и лимиты между выпусками. "
         "«Итого к покупке» здесь не выводится — это была бы неверная цифра."
@@ -360,6 +396,8 @@ table = [
         "Погашение": fmt_text(s.get("maturity")),
         "Цена": fmt_num(s.get("clean_price"), 2),
         "ОФЗ YTM": fmt_pct(s.get("ofz_ytm")),
+        "Обоснование": " | ".join(s.get("reasons") or []) or "—",
+        "Не пройдены проверки": " | ".join(s.get("failed") or []) or "—",
     }
     for s in view
 ]
@@ -371,7 +409,7 @@ st.dataframe(
     column_config={"Балл": st.column_config.NumberColumn(format="%.1f")},
 )
 
-expander_cap = 40
+expander_cap = len(view)
 st.caption(
     f"Показано {len(view)} из {len(signals)}. "
     f"Разбор причин — для первых {min(expander_cap, len(view))} строк."

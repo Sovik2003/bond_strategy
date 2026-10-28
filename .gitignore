@@ -38,3 +38,7 @@ data/reports/
 .vscode/
 .idea/
 .DS_Store
+
+# Manually entered holdings are private local data
+data/portfolio.json
+data/.portfolio-*.tmp
