@@ -45,8 +45,18 @@ def synthetic_coupon_dates(issue: BondIssue, settlement: date) -> list[date]:
 
 
 def outstanding_before(issue: BondIssue, target: date) -> float:
-    """Остаточный номинал на дату: амортизация строго до неё уже выплачена."""
-    nominal = issue.initial_nominal
+    """Остаточный номинал на дату: амортизация строго до неё уже выплачена.
+
+    База — ТЕКУЩИЙ номинал, а не изначальный. `amortization` содержит только
+    предстоящие платежи: прошлые уже отражены в `nominal`. Если брать
+    изначальный номинал, у бумаги, амортизированной наполовину, купоны
+    считались бы от суммы, которой больше нет.
+
+    Насколько это заметно: у выпуска с номиналом 50 ₽ и изначальным 1000 ₽
+    купон выходил 39,25 ₽ вместо 1,96 ₽, а доходность к погашению — 850%
+    вместо 8,5%.
+    """
+    nominal = issue.nominal
     for p in sorted(issue.amortization, key=lambda x: x.payment_date):
         if p.payment_date < target:
             nominal -= issue.initial_nominal * p.share_of_nominal

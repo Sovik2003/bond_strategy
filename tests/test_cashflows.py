@@ -111,3 +111,44 @@ def test_xirr_simple():
 
 def test_xirr_none_without_sign_change():
     assert xirr([(date(2026, 1, 1), 1000.0), (date(2027, 1, 1), 1100.0)]) is None
+
+
+def test_coupon_uses_current_nominal_not_initial():
+    """Купон считается от ТЕКУЩЕГО номинала.
+
+    У амортизированной бумаги `nominal` уже уменьшен, а `amortization` содержит
+    только предстоящие платежи. Если базой брать `initial_nominal`, купоны
+    выходят в разы больше, и доходность к погашению становится бессмысленной:
+    на реальном выпуске с номиналом 50 ₽ из 1000 ₽ получалось 850% вместо 8,5%.
+    """
+    issue = normal()
+    issue.nominal = 50.0
+    issue.initial_nominal = 1000.0
+    issue.coupon_rate = 0.0785
+    issue.coupon_frequency = 2
+    issue.coupon_schedule = []
+    issue.amortization = []
+    schedule = build_schedule(issue, TEST_DATE)
+    coupons = [f for f in schedule if f.kind == "coupon"]
+    assert coupons
+    # 7,85% годовых от 50 ₽ при полугодовом купоне — около 1,96 ₽
+    for flow in coupons:
+        assert flow.amount_per_bond == pytest.approx(1.96, abs=0.01)
+
+
+def test_amortized_paper_yield_is_sane():
+    """Регрессия: доходность амортизированной бумаги не выходит за разумные пределы."""
+    from bond_strategy.analytics.yield_calc import calculate_ytm
+
+    issue = normal()
+    issue.nominal = 50.0
+    issue.initial_nominal = 1000.0
+    issue.coupon_rate = 0.0785
+    issue.coupon_schedule = []
+    issue.amortization = []
+    issue.clean_price = 94.1
+    issue.accrued_interest = 0.1
+    result = calculate_ytm(issue, TEST_DATE)
+    assert result.ok, result.message
+    assert result.ytm is not None
+    assert -0.5 < result.ytm < 1.0, f"доходность {result.ytm:.2%} вне разумных пределов"
