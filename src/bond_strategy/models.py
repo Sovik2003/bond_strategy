@@ -128,6 +128,37 @@ class BondIssue:
     def blocked_fields(self) -> list[str]:
         return [name for name, st in self.status.items() if st.blocks_buy]
 
+    # Поля, без которых нельзя ни посчитать стоимость сделки, ни проверить лимит
+    # по сроку, ни отнести бумагу к категории рейтинга. Набор отвечает на
+    # требование раздела 3: «условия выпуска и данные для расчёта доступны».
+    REQUIRED_FOR_CALC = (
+        "clean_price",
+        "accrued_interest",
+        "maturity_date",
+        "rating",
+        "industry",
+    )
+
+    def missing_fields(self) -> list[str]:
+        """Обязательные для расчёта поля, которые пусты.
+
+        Отсутствие поля не заменяется значением по умолчанию: оценённая
+        «примерно» доля портфеля хуже, чем честный отказ.
+        """
+        return [name for name in self.REQUIRED_FOR_CALC if getattr(self, name, None) is None]
+
+    def data_completeness(self) -> float:
+        """Доля заполненных обязательных полей, от 0 до 1.
+
+        Считается по значениям, а не по `status`: статус отвечает на вопрос
+        «свежие ли данные», а здесь нужен ответ «есть ли они вообще». Выпуск со
+        свежей, но пустой ценой должен отсеиваться.
+        """
+        total = len(self.REQUIRED_FOR_CALC)
+        if not total:
+            return 1.0
+        return (total - len(self.missing_fields())) / total
+
 
 @dataclass
 class Position:
