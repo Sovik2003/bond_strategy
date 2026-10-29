@@ -172,6 +172,11 @@ if saved_clicked:
         st.error(f"Портфель не сохранён: {exc}")
 
 snapshot = st.session_state["portfolio_snapshot"]
+_last = st.session_state.get("result")
+_names = {h.get("secid"): h.get("security_name") for h in ((_last.summary.get("portfolio") or {}).get("holdings", []) if _last else [])}
+if snapshot["positions"] and _names:
+    st.caption("Наименования позиций по данным борды: " + "; ".join(
+        f"{p['secid']} — {_names.get(p['secid']) or 'не найдено'}" for p in snapshot["positions"]))
 capital = snapshot["cash"] + sum(p["market_value"] for p in snapshot["positions"])
 st.metric("Сумма портфеля: облигации с НКД + свободные деньги", fmt_rub(capital))
 st.caption("Изменения в форме применяются только после нажатия «Сохранить портфель». Расчёт использует сохранённые данные.")
@@ -385,6 +390,7 @@ table = [
     {
         "№": s.get("rank"),
         "secid": fmt_text(s.get("secid")),
+        "Наименование": fmt_text(s.get("security_name")),
         "Эмитент": fmt_text(s.get("issuer")),
         "Рейтинг": fmt_text(s.get("rating")),
         "Агентство": fmt_text(s.get("rating_agency")),

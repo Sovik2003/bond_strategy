@@ -121,6 +121,7 @@ def run_pipeline(
     portfolio = Portfolio(cfg=cfg, cash=cfg.initial_capital if cash is None else float(cash))
     if not isfinite(portfolio.cash) or portfolio.cash < 0:
         raise ValueError("Свободные деньги должны быть неотрицательным числом")
+    names: dict[str, str | None] = {}
     if holdings:
         # Holdings are resolved independently of the screener and enrichment limit.
         # Values are manually entered total RUB values including accrued interest.
@@ -148,6 +149,7 @@ def run_pipeline(
             selected.append(row)
             seen.add(actual_secid)
             resolved[secid] = actual_secid
+            names[secid] = row.get("SHORTNAME") or None
         held_issues, _, held_errors = build_universe(
             client, selected, as_of, cfg, str(issuers_path), workers=workers
         )
@@ -200,6 +202,7 @@ def run_pipeline(
                 "isin": issue.isin,
                 "secid": issue.secid,
                 "issuer": issue.issuer_name,
+                "security_name": issue.security_name,
                 "maturity": issue.maturity_date.isoformat() if issue.maturity_date else None,
                 "coupon_type": issue.coupon_type,
                 "clean_price": issue.clean_price,
@@ -237,7 +240,10 @@ def run_pipeline(
             "cash": portfolio.cash,
             "bonds_value": portfolio.bonds_value(prices),
             "total_value": portfolio.total_value(prices),
-            "holdings": holdings or [],
+            "holdings": [
+                {**h, "security_name": names.get(str(h.get("secid", "")).strip().upper())}
+                for h in (holdings or [])
+            ],
         },
     }
     return result

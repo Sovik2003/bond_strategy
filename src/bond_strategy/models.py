@@ -95,6 +95,7 @@ class BondIssue:
     rating_date: Optional[date] = None
     default_flag: bool = False
     restructuring_flag: bool = False
+    security_name: Optional[str] = None      # SHORTNAME с борды, для отображения
 
     # рыночные данные
     clean_price: Optional[float] = None

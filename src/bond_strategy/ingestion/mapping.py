@@ -199,5 +199,6 @@ def build_issue(
         avg_daily_turnover=None,
         avg_spread=spread,
         coupon_schedule=future_coupons(bondization, as_of),
+        security_name=(row.get("SHORTNAME") or description.get("SHORTNAME") or None),
     )
     return apply_validation(issue, as_of, cfg)
