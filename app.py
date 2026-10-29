@@ -18,6 +18,7 @@ import streamlit as st
 import pandas as pd
 
 from portfolio_inputs import load_portfolio, save_portfolio, validate_portfolio
+from ui_portfolio import render_portfolio_form
 
 from bond_strategy.config import StrategyConfig, load_config
 from bond_strategy.ingestion.moex import IssClient, IssError
@@ -147,36 +148,21 @@ if "portfolio_snapshot" not in st.session_state:
         st.stop()
 
 st.title("bond_strategy")
+st.caption("Скринер кандидатов. Ребалансировка готового портфеля — на странице «Ребалансировка» слева.")
 st.subheader("Купленные позиции")
 st.caption("Введите SECID с борда TQCB, количество бумаг и текущую стоимость всей позиции в рублях с НКД. Цены нужно обновлять вручную. Сохранение — только на этом компьютере.")
-with st.form("portfolio_form"):
-    saved = st.session_state["portfolio_snapshot"]
-    free_cash = st.number_input("Свободные деньги, ₽", min_value=0.0, value=float(saved["cash"]), step=1000.0)
-    frame = pd.DataFrame(saved["positions"], columns=["secid", "quantity", "market_value"])
-    editor = st.data_editor(
-        frame, num_rows="dynamic", hide_index=True, width="stretch",
-        column_config={
-            "secid": st.column_config.TextColumn("SECID / ISIN", required=True),
-            "quantity": st.column_config.NumberColumn("Количество, шт.", min_value=1, step=1, required=True),
-            "market_value": st.column_config.NumberColumn("Стоимость позиции с НКД, ₽", min_value=0.01, step=100.0, required=True),
-        },
-    )
-    saved_clicked = st.form_submit_button("Сохранить портфель")
-if saved_clicked:
-    try:
-        snapshot = validate_portfolio(free_cash, editor.to_dict("records"))
-        save_portfolio(PORTFOLIO_PATH, snapshot)
-        st.session_state["portfolio_snapshot"] = snapshot
-        st.success("Портфель сохранён. Запустите расчёт, чтобы учесть изменения.")
-    except (ValueError, OSError) as exc:
-        st.error(f"Портфель не сохранён: {exc}")
+snapshot = render_portfolio_form(
+    PORTFOLIO_PATH,
+    names={
+        h.get("secid"): h.get("security_name")
+        for h in (
+            (st.session_state.get("result").summary.get("portfolio") or {}).get("holdings", [])
+            if st.session_state.get("result")
+            else []
+        )
+    },
+)
 
-snapshot = st.session_state["portfolio_snapshot"]
-_last = st.session_state.get("result")
-_names = {h.get("secid"): h.get("security_name") for h in ((_last.summary.get("portfolio") or {}).get("holdings", []) if _last else [])}
-if snapshot["positions"] and _names:
-    st.caption("Наименования позиций по данным борды: " + "; ".join(
-        f"{p['secid']} — {_names.get(p['secid']) or 'не найдено'}" for p in snapshot["positions"]))
 capital = snapshot["cash"] + sum(p["market_value"] for p in snapshot["positions"])
 st.metric("Сумма портфеля: облигации с НКД + свободные деньги", fmt_rub(capital))
 st.caption("Изменения в форме применяются только после нажатия «Сохранить портфель». Расчёт использует сохранённые данные.")
