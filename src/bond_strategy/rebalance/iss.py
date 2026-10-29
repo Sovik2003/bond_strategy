@@ -46,6 +46,7 @@ def load_market(
     workers: int = 6,
     cache_root: str | None = "data/cache",
     page_size: int = 50,
+    limit: int | None = None,
     progress: Progress | None = None,
 ) -> tuple[list[BondIssue], dict[str, str]]:
     """Выпуски, доступные на рынке, и ошибки загрузки по ISIN.
@@ -56,6 +57,10 @@ def load_market(
 
     `cache_root=None` отключает кэш — нужно, когда важна свежесть любой ценой
     или когда прогон разовый.
+
+    `limit` ограничивает число обогащаемых выпусков. Это не «режим для тестов»
+    только: на медленном канале полезно сначала собрать часть рынка, посмотреть
+    отчёт и продолжить позже — кэш делает второй запуск продолжением первого.
     """
     say = progress or _silent
     cache = MarketCache(cache_root, MarketCache.make_fingerprint(as_of, strategy_cfg.config_id)) if cache_root else None
@@ -65,6 +70,9 @@ def load_market(
 
     passed, stats = screen(rows, as_of, strategy_cfg)
     say(f"Прошло отсев: {len(passed)} из {len(rows)}")
+    if limit is not None:
+        passed = passed[:limit]
+        say(f"Ограничение выборки: {len(passed)} выпусков")
 
     if cache is not None:
         cached = sum(1 for row in passed if cache.has(row["SECID"]))
@@ -86,7 +94,9 @@ def load_market(
                     issues.append(issue)
 
         if pending:
-            loaded, page_errors, page_stats = build_universe(
+            # build_universe возвращает (выпуски, статистика, ошибки) — порядок
+            # именно такой, и перепутать второй с третьим легко.
+            loaded, _page_stats, page_errors = build_universe(
                 client,
                 pending,
                 as_of,
@@ -96,22 +106,26 @@ def load_market(
                 stats=stats,
             )
             issues.extend(loaded)
-            errors.update(page_errors)
+            for error in page_errors:
+                errors[error.split(":")[0]] = error
             if cache is not None:
                 cache.put_many(loaded)
                 cache.save()
 
             say(
-                f"Страница {start // page_size + 1}: "
+                f"Страница {start // page_size + 1} из "
+                f"{(len(passed) + page_size - 1) // page_size}: "
                 f"+{len(loaded)} выпусков, ошибок {len(page_errors)}, "
                 f"в кэше {len(cache) if cache else 0}"
             )
         else:
             say(f"Страница {start // page_size + 1}: целиком из кэша")
 
-    if cache is not None:
-        # Полный набор — из кэша: туда попало всё, что удалось загрузить за все
-        # запуски, включая выпуски, которые в текущей странице не попали.
-        issues = cache.all_issues() or issues
+    # Возвращается ровно то, что относится к текущему отбору. Раньше здесь
+    # брался весь кэш целиком, и `limit` переставал работать: к выборке из
+    # пяти бумаг подмешивались все, загруженные когда-либо. Кэш — это источник
+    # данных, а не источник списка: список задаёт доска и отсев.
+    allowed = {row["SECID"] for row in passed}
+    issues = [issue for issue in issues if issue.secid in allowed]
 
     return issues, errors
