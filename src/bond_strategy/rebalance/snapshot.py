@@ -251,20 +251,15 @@ class PortfolioState:
 
     # --- проекция сделки ------------------------------------------------
 
-    def with_purchase(
-        self, issue: BondIssue, lots: int, lot_size: int | None = None
-    ) -> "PortfolioState":
-        """Новый снимок после покупки `lots` лотов.
+    def with_units(self, issue: BondIssue, quantity: int) -> "PortfolioState":
+        """Новый снимок после покупки `quantity` бумаг — без лотов.
 
-        `lot_size` по умолчанию берётся из выпуска. Количество переводится в
-        бумаги здесь и только здесь: выше по коду лоты и бумаги не смешиваются.
-        Деньги списываются по грязной цене, потому что НКД продавцу платится
-        вместе с ценой.
+        Отдельный метод нужен проверке лимитов: она может спросить про
+        количество, не кратное лоту (например, «одна бумага»), и получать из-за
+        этого другую сделку было бы ошибкой. Здесь количество берётся как есть.
         """
-        if lots <= 0:
+        if quantity <= 0:
             return self
-        size = lot_size if lot_size is not None else max(issue.min_lot, 1)
-        quantity = lots * size
         dirty = issue.dirty_price()
         if dirty is None:
             raise ValueError(f"{issue.secid}: нет цены или НКД, покупка не оценивается")
@@ -288,6 +283,21 @@ class PortfolioState:
             horizon_years=self.horizon_years,
             low_rating_levels=self._low_rating_levels,
         )
+
+    def with_purchase(
+        self, issue: BondIssue, lots: int, lot_size: int | None = None
+    ) -> "PortfolioState":
+        """Новый снимок после покупки `lots` лотов.
+
+        `lot_size` по умолчанию берётся из выпуска. Количество переводится в
+        бумаги здесь и только здесь: выше по коду лоты и бумаги не смешиваются.
+        Деньги списываются по грязной цене, потому что НКД продавцу платится
+        вместе с ценой.
+        """
+        if lots <= 0:
+            return self
+        size = lot_size if lot_size is not None else max(issue.min_lot, 1)
+        return self.with_units(issue, lots * size)
 
     def purchase_cost(self, issue: BondIssue, lots: int, lot_size: int | None = None) -> float:
         """Стоимость `lots` лотов с НКД — без изменения состояния."""

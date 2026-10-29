@@ -15,6 +15,7 @@
 """
 from .config import LadderBand, Limits, RebalanceConfig, load_rebalance_config
 from .eligibility import Check, Eligibility, check_eligibility, check_risk_quality
+from .limits import LimitCheck, check_purchase, existing_breaches, violations
 from .snapshot import Exposure, Holding, PortfolioState
 
 __all__ = [
@@ -29,4 +30,8 @@ __all__ = [
     "Eligibility",
     "check_eligibility",
     "check_risk_quality",
+    "LimitCheck",
+    "check_purchase",
+    "existing_breaches",
+    "violations",
 ]
