@@ -30,7 +30,9 @@ def prices(*issues):
 def test_buy_deducts_full_amount(portfolio):
     issue = normal()
     trade = portfolio.buy(issue, 10, TEST_DATE)
-    expected = 10 * (98.5 + 7.5) / 100 * 1000
+    # Цена в процентах от номинала, НКД — рубли на бумагу: 10 * (985 + 7.5).
+    # Складывать 98.5 и 7.5 «в лоб» значило бы прибавить рубли к процентам.
+    expected = 10 * (98.5 / 100 * 1000 + 7.5)
     assert trade.amount == pytest.approx(expected)
     assert portfolio.cash == pytest.approx(50000 - expected)
     assert portfolio.positions[issue.isin].quantity == 10
@@ -39,8 +41,9 @@ def test_buy_deducts_full_amount(portfolio):
 def test_commission_charged(portfolio):
     issue = normal()
     trade = portfolio.buy(issue, 10, TEST_DATE, commission_rate=0.01)
-    assert trade.commission == pytest.approx(106.0)
-    assert trade.amount == pytest.approx(10_706.0)
+    # 1% от 9 925 ₽ = 99,25 ₽; итого 10 024,25 ₽
+    assert trade.commission == pytest.approx(99.25)
+    assert trade.amount == pytest.approx(10_024.25)
 
 
 def test_duplicate_buy_rejected(portfolio):

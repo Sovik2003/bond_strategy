@@ -45,12 +45,72 @@ def synthetic_coupon_dates(issue: BondIssue, settlement: date) -> list[date]:
 
 
 def outstanding_before(issue: BondIssue, target: date) -> float:
-    """Остаточный номинал на дату: амортизация строго до неё уже выплачена."""
-    nominal = issue.initial_nominal
+    """Остаточный номинал на дату: амортизация строго до неё уже выплачена.
+
+    База — ТЕКУЩИЙ номинал, а не изначальный. `amortization` содержит только
+    предстоящие платежи: прошлые уже отражены в `nominal`. Если брать
+    изначальный номинал, у бумаги, амортизированной наполовину, купоны
+    считались бы от суммы, которой больше нет.
+
+    Насколько это заметно: у выпуска с номиналом 50 ₽ и изначальным 1000 ₽
+    купон выходил 39,25 ₽ вместо 1,96 ₽, а доходность к погашению — 850%
+    вместо 8,5%.
+    """
+    nominal = issue.nominal
     for p in sorted(issue.amortization, key=lambda x: x.payment_date):
         if p.payment_date < target:
             nominal -= issue.initial_nominal * p.share_of_nominal
     return max(nominal, 0.0)
+
+
+# Допуск на расхождение дат между расчётным графиком и фактическим. ISS
+# ставит купон на дату выплаты, а расчёт идёт от даты погашения шагом периода:
+# расхождение в несколько дней — норма, а не другой график.
+DATE_TOLERANCE_DAYS = 10
+
+
+def _matches(pay_date: date, expected: list[date]) -> bool:
+    return any(abs((pay_date - candidate).days) <= DATE_TOLERANCE_DAYS for candidate in expected)
+
+
+def _coupon_flows(issue: BondIssue, settlement: date) -> list[tuple[date, float]]:
+    """Купоны после даты расчёта: суммы из графика, недостающие — по ставке.
+
+    Возвращает пары (дата, сумма на бумагу).
+    """
+    scheduled = [
+        (pay_date, amount)
+        for pay_date, amount in sorted(issue.coupon_schedule)
+        if pay_date > settlement and amount > 0
+    ]
+    if not issue.coupon_rate:
+        return scheduled
+
+    fraction = 1.0 / issue.coupon_frequency if issue.coupon_frequency else 0.0
+    expected = synthetic_coupon_dates(issue, settlement)
+    if not expected:
+        return scheduled
+
+    # График не про те же даты — значит он описывает собственный график выпуска,
+    # и подменять его расчётом нельзя.
+    if scheduled and not any(_matches(pay_date, expected) for pay_date, _ in scheduled):
+        return scheduled
+
+    known = {}
+    for pay_date, amount in scheduled:
+        nearest = min(expected, key=lambda candidate: abs((pay_date - candidate).days))
+        if abs((nearest - pay_date).days) <= DATE_TOLERANCE_DAYS:
+            known[nearest] = amount
+
+    out: list[tuple[date, float]] = []
+    for pay_date in expected:
+        if pay_date in known:
+            out.append((pay_date, known[pay_date]))
+            continue
+        coupon = outstanding_before(issue, pay_date) * issue.coupon_rate * fraction
+        if coupon > 0:
+            out.append((pay_date, coupon))
+    return out
 
 
 def build_schedule(issue: BondIssue, settlement: date) -> list[CashFlow]:
@@ -64,16 +124,19 @@ def build_schedule(issue: BondIssue, settlement: date) -> list[CashFlow]:
 
     flows: list[CashFlow] = []
 
-    if issue.coupon_schedule:
-        for pay_date, amount in sorted(issue.coupon_schedule):
-            if pay_date > settlement and amount > 0:
-                flows.append(CashFlow(pay_date, round(amount, 6), "coupon"))
-    elif issue.coupon_rate:
-        fraction = 1.0 / issue.coupon_frequency if issue.coupon_frequency else 0.0
-        for pay_date in synthetic_coupon_dates(issue, settlement):
-            coupon = outstanding_before(issue, pay_date) * issue.coupon_rate * fraction
-            if coupon > 0:
-                flows.append(CashFlow(pay_date, round(coupon, 6), "coupon"))
+    # Приоритет фактического графика не безусловен. MOEX ISS отдаёт ДАТЫ всех
+    # будущих купонов, но суммы у них часто пустые (`value: null`): известны
+    # только уже выплаченные. Из такого графика в `coupon_schedule` попадает
+    # одна-две записи на весь срок, и если доверять ему целиком, доходность
+    # считается по купонам, которых не будет. Именно так получалась
+    # отрицательная доходность у бумаг с купоном 16% годовых.
+    #
+    # Различие по признаку, а не по количеству. Если даты графика совпадают с
+    # расчётными, график описывает те же купоны, и недостающие суммы
+    # восстанавливаются по ставке. Если даты другие — у выпуска свой,
+    # нестандартный график, и фактические данные главнее расчёта.
+    for pay_date, amount in _coupon_flows(issue, settlement):
+        flows.append(CashFlow(pay_date, round(amount, 6), "coupon"))
 
     # Амортизация списывает номинал от исходного значения.
     # Погашение возвращает остаток текущего номинала: часть могла быть

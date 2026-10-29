@@ -92,7 +92,11 @@ def test_small_capital_cannot_buy(cfg):
 
 def test_low_premium_goes_to_watch(portfolio, cfg):
     issue = normal()
-    issue.ofz_ytm = 0.20  # ОФЗ выше доходности выпуска -> премия отрицательная
+    # ОФЗ заведомо выше доходности выпуска -> премия отрицательная.
+    # Эталон сдвинут с 20% на 30% после исправления учёта НКД: раньше стоимость
+    # бумаги завышалась на величину НКД, из-за чего доходность выходила ниже
+    # 20% и премия случайно оказывалась отрицательной при этой же ставке ОФЗ.
+    issue.ofz_ytm = 0.30
     signal = evaluate_issue(issue, portfolio, px(issue), TEST_DATE, cfg)
     assert signal.signal_type is not SignalType.BUY
     assert any("LOW_PREMIUM" in f or "LOW_SCORE" in f for f in signal.failed_conditions)

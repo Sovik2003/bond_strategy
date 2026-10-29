@@ -111,10 +111,36 @@ class BondIssue:
 
     status: dict[str, DataStatus] = field(default_factory=dict)
 
-    def dirty_price(self) -> Optional[float]:
-        if self.clean_price is None or self.accrued_interest is None:
+    def accrued_interest_pct(self) -> Optional[float]:
+        """НКД в процентах от номинала.
+
+        В MOEX ISS `ACCRUEDINT` — это РУБЛИ на бумагу, а `PREVPRICE` — проценты
+        от номинала. Складывать их напрямую нельзя.
+
+        Проверка на реальных данных: для выпуска с купоном 69,81 ₽, предыдущей
+        выплатой 2026-06-09 и расчётом 2026-10-26 прошло 139 дней из 182, то
+        есть НКД по расчёту 53,32 ₽. ISS отдаёт 54,85 — рубли. Если читать как
+        проценты, вышло бы 548,50 ₽, больше половины номинала.
+
+        Вторая проверка: MOEX публикует для этого выпуска доходность 14,98%.
+        Трактовка «рубли» даёт 15,80%, трактовка «проценты» — минус 39,98%.
+        """
+        if self.accrued_interest is None or not self.nominal:
             return None
-        return self.clean_price + self.accrued_interest
+        return self.accrued_interest / self.nominal * 100.0
+
+    def dirty_price(self) -> Optional[float]:
+        """Грязная цена в процентах от номинала — в тех же единицах, что clean_price.
+
+        Иначе каждый вызывающий код должен помнить про разницу единиц, и
+        однажды забудет: получалось «153,96%» для бумаги, которая стоит 104,6%.
+        """
+        if self.clean_price is None:
+            return None
+        nkd_pct = self.accrued_interest_pct()
+        if nkd_pct is None:
+            return None
+        return self.clean_price + nkd_pct
 
     def critical_status(self) -> DataStatus:
         present = set(self.status.values())
@@ -127,6 +153,37 @@ class BondIssue:
 
     def blocked_fields(self) -> list[str]:
         return [name for name, st in self.status.items() if st.blocks_buy]
+
+    # Поля, без которых нельзя ни посчитать стоимость сделки, ни проверить лимит
+    # по сроку, ни отнести бумагу к категории рейтинга. Набор отвечает на
+    # требование раздела 3: «условия выпуска и данные для расчёта доступны».
+    REQUIRED_FOR_CALC = (
+        "clean_price",
+        "accrued_interest",
+        "maturity_date",
+        "rating",
+        "industry",
+    )
+
+    def missing_fields(self) -> list[str]:
+        """Обязательные для расчёта поля, которые пусты.
+
+        Отсутствие поля не заменяется значением по умолчанию: оценённая
+        «примерно» доля портфеля хуже, чем честный отказ.
+        """
+        return [name for name in self.REQUIRED_FOR_CALC if getattr(self, name, None) is None]
+
+    def data_completeness(self) -> float:
+        """Доля заполненных обязательных полей, от 0 до 1.
+
+        Считается по значениям, а не по `status`: статус отвечает на вопрос
+        «свежие ли данные», а здесь нужен ответ «есть ли они вообще». Выпуск со
+        свежей, но пустой ценой должен отсеиваться.
+        """
+        total = len(self.REQUIRED_FOR_CALC)
+        if not total:
+            return 1.0
+        return (total - len(self.missing_fields())) / total
 
 
 @dataclass

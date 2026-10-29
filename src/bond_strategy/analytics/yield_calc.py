@@ -23,7 +23,9 @@ def purchase_cost_per_bond(issue: BondIssue, commission_rate: float = 0.0) -> fl
     """Полная стоимость одной бумаги: грязная цена плюс комиссия."""
     if issue.clean_price is None or issue.accrued_interest is None:
         return None
-    gross = (issue.clean_price + issue.accrued_interest) / 100.0 * issue.nominal
+    # clean_price — проценты от номинала, accrued_interest — рубли на бумагу.
+    # Сложить «в лоб» значило бы прибавить рубли к процентам.
+    gross = issue.clean_price / 100.0 * issue.nominal + issue.accrued_interest
     return gross * (1.0 + commission_rate)
 
 

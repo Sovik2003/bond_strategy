@@ -110,7 +110,11 @@ class Portfolio:
         if quantity <= 0:
             raise LimitViolation("BAD_QUANTITY", "Количество должно быть положительным")
 
-        gross = quantity * (issue.clean_price + issue.accrued_interest) / 100.0 * issue.nominal
+        # clean_price — проценты от номинала, accrued_interest — рубли на
+        # бумагу. Сложение «в лоб» завышало стоимость на порядок НКД.
+        gross = quantity * (
+            issue.clean_price / 100.0 * issue.nominal + issue.accrued_interest
+        )
         commission = gross * commission_rate
         total = gross + commission
 
@@ -182,11 +186,8 @@ class Portfolio:
         if key in self.processed_keys:
             raise LimitViolation("DUPLICATE", "Операция уже учтена")
 
-        gross = (
-            quantity
-            * (issue.clean_price + issue.accrued_interest)
-            / 100.0
-            * pos.nominal_outstanding
+        gross = quantity * (
+            issue.clean_price / 100.0 * pos.nominal_outstanding + issue.accrued_interest
         )
         commission = gross * commission_rate
         proceeds = gross - commission
@@ -357,7 +358,8 @@ def position_size(
         return 0
 
     lot_cost = (
-        issue.min_lot * (issue.clean_price + issue.accrued_interest) / 100.0 * issue.nominal
+        issue.min_lot
+        * (issue.clean_price / 100.0 * issue.nominal + issue.accrued_interest)
     ) * (1.0 + commission_rate)
     if lot_cost <= 0:
         return 0

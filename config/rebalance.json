@@ -1,0 +1,67 @@
+{
+  "_comment": "Пороги ребалансировки. Отдельно от strategy.json: это правила для уже собранного портфеля, а не для скринера. Суммы в рублях здесь не хранятся: все лимиты считаются от текущей стоимости портфеля.",
+  "version": "1.0.0",
+
+  "horizon": {
+    "years": 5,
+    "_comment": "Горизонт постоянно обновляется от даты запуска; старше 5 лет бумага переходит в пятилетний интервал без продажи."
+  },
+
+  "limits": {
+    "issue_max_share": 0.05,
+    "issuer_max_share": 0.10,
+    "group_max_share": 0.10,
+    "industry_max_share": 0.25,
+    "low_rating_max_share": 0.25,
+    "over_5y_max_share": 0.10
+  },
+
+  "ratings": {
+    "min_level": "BBB",
+    "_comment_min_level": "BBB допускается, BBB- нет. Шкала упорядочена от лучшего к худшему, сравнение идёт по индексу.",
+    "low_rating_levels": ["BBB+", "BBB"],
+    "_comment_low_rating": "Справочное поле. Фактический список считается от min_level в коде.",
+    "max_age_days": 400,
+    "approved_agencies": ["АКРА", "Эксперт РА", "НКР", "НРА"],
+    "_comment_agencies": "Утверждённый список агентств по национальным шкалам. Рейтинг от агентства вне списка не учитывается. Просроченный (старше max_age_days) или отозванный рейтинг действующим не считается."
+  },
+
+  "ladder": {
+    "_comment": "Ориентиры для покупок, а не поводы для продажи. Сумма верхних границ больше 100% — это нормально. Последний интервал задаёт только верхний предел.",
+    "bands": [
+      {"code": "0-1", "label": "до 1 года",               "lower_years": 0, "upper_years": 1,    "target": 0.15, "lower": 0.10, "upper": 0.20},
+      {"code": "1-2", "label": "более 1 года — до 2 лет", "lower_years": 1, "upper_years": 2,    "target": 0.20, "lower": 0.15, "upper": 0.25},
+      {"code": "2-3", "label": "более 2 лет — до 3 лет",  "lower_years": 2, "upper_years": 3,    "target": 0.20, "lower": 0.15, "upper": 0.25},
+      {"code": "3-4", "label": "более 3 лет — до 4 лет",  "lower_years": 3, "upper_years": 4,    "target": 0.20, "lower": 0.15, "upper": 0.25},
+      {"code": "4-5", "label": "более 4 лет — до 5 лет",  "lower_years": 4, "upper_years": 5,    "target": 0.15, "lower": 0.10, "upper": 0.20},
+      {"code": "5+",  "label": "более 5 лет",             "lower_years": 5, "upper_years": null, "target": null, "lower": 0.0,  "upper": 0.10}
+    ]
+  },
+
+  "duration": {
+    "target_min": 2.5,
+    "target_max": 3.0,
+    "buy_max": 3.5,
+    "_comment": "Превышение дюрации само по себе не вызывает продажу: это ставка, а не кредитный риск. Если дюрация портфеля выше buy_max, разрешены только покупки, которые её снижают."
+  },
+
+  "eligibility": {
+    "require_unknown_flags_verified": false,
+    "_comment_flags": "Субординация и право эмитента на досрочный выкуп из ISS не приходят. False — такие выпуски допускаются с замечанием в отчёте; True — блокируются.",
+    "min_data_completeness": 1.0,
+    "require_fixed_coupon": true,
+    "require_maturity": true,
+    "reject_offer": true
+  },
+
+  "planner": {
+    "concentration_epsilon": 0.001,
+    "_comment_epsilon": "Допуск при сравнении кандидатов. Без него победитель определялся бы разницей в тысячные доли процента.",
+    "max_purchases": 200
+  },
+
+  "issuer_groups": {
+    "_comment": "Группы связанных компаний: одинаковые значения — одна группа. Заполняется вручную: в ISS этих связей нет. Пустая карта — каждый эмитент сам себе группа.",
+    "groups": {}
+  }
+}
