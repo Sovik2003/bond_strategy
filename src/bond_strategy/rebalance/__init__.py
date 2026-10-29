@@ -16,6 +16,7 @@
 from .config import LadderBand, Limits, RebalanceConfig, load_rebalance_config
 from .eligibility import Check, Eligibility, check_eligibility, check_risk_quality
 from .limits import LimitCheck, check_purchase, existing_breaches, violations
+from .positions import PositionAssessment, PositionStatus, assess_all
 from .snapshot import Exposure, Holding, PortfolioState
 
 __all__ = [
@@ -34,4 +35,7 @@ __all__ = [
     "check_purchase",
     "existing_breaches",
     "violations",
+    "PositionAssessment",
+    "PositionStatus",
+    "assess_all",
 ]
