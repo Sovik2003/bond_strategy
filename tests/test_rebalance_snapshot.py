@@ -64,8 +64,9 @@ def state(cfg, holdings=(), cash=100_000.0, as_of=AS_OF):
 def test_value_includes_accrued_interest():
     item = issue(price=100.0, nkd=5.0)
     holding = Holding(item, 10)
-    # 10 бумаг по грязной цене 105% от 1000 ₽
-    assert holding.value == pytest.approx(10_500.0)
+    # Цена 100% от 1000 ₽ плюс НКД 5 ₽ на бумагу: 10 * (1000 + 5).
+    # НКД — рубли, поэтому он прибавляется к рублёвой стоимости, а не к цене.
+    assert holding.value == pytest.approx(10_050.0)
 
 
 def test_position_without_price_is_not_valued_by_nominal():
@@ -177,7 +178,8 @@ def test_purchase_cost_matches_projection(cfg):
     item = issue(nkd=7.0)
     s = state(cfg, [], cash=100_000.0)
     cost = s.purchase_cost(item, 3)
-    assert cost == pytest.approx(3 * 1000 * 107.0 / 100.0)
+    # 3 * (1000 ₽ по цене 100% + НКД 7 ₽) — НКД в рублях на бумагу
+    assert cost == pytest.approx(3 * (1000.0 + 7.0))
     assert s.with_purchase(item, 3).cash == pytest.approx(100_000.0 - cost)
 
 

@@ -111,10 +111,36 @@ class BondIssue:
 
     status: dict[str, DataStatus] = field(default_factory=dict)
 
-    def dirty_price(self) -> Optional[float]:
-        if self.clean_price is None or self.accrued_interest is None:
+    def accrued_interest_pct(self) -> Optional[float]:
+        """НКД в процентах от номинала.
+
+        В MOEX ISS `ACCRUEDINT` — это РУБЛИ на бумагу, а `PREVPRICE` — проценты
+        от номинала. Складывать их напрямую нельзя.
+
+        Проверка на реальных данных: для выпуска с купоном 69,81 ₽, предыдущей
+        выплатой 2026-06-09 и расчётом 2026-10-26 прошло 139 дней из 182, то
+        есть НКД по расчёту 53,32 ₽. ISS отдаёт 54,85 — рубли. Если читать как
+        проценты, вышло бы 548,50 ₽, больше половины номинала.
+
+        Вторая проверка: MOEX публикует для этого выпуска доходность 14,98%.
+        Трактовка «рубли» даёт 15,80%, трактовка «проценты» — минус 39,98%.
+        """
+        if self.accrued_interest is None or not self.nominal:
             return None
-        return self.clean_price + self.accrued_interest
+        return self.accrued_interest / self.nominal * 100.0
+
+    def dirty_price(self) -> Optional[float]:
+        """Грязная цена в процентах от номинала — в тех же единицах, что clean_price.
+
+        Иначе каждый вызывающий код должен помнить про разницу единиц, и
+        однажды забудет: получалось «153,96%» для бумаги, которая стоит 104,6%.
+        """
+        if self.clean_price is None:
+            return None
+        nkd_pct = self.accrued_interest_pct()
+        if nkd_pct is None:
+            return None
+        return self.clean_price + nkd_pct
 
     def critical_status(self) -> DataStatus:
         present = set(self.status.values())

@@ -84,7 +84,9 @@ def evaluate_issue(
         failed.append("NO_SIZE: лимиты не позволяют позицию")
         return build(SignalType.WATCH, score, None, None, "Нет допустимого размера")
 
-    cost = qty * (issue.clean_price + issue.accrued_interest) / 100.0 * issue.nominal
+    # НКД — рубли на бумагу, цена — проценты от номинала. Сложение «в лоб»
+    # прибавляло рубли к процентам и завышало стоимость на величину НКД.
+    cost = qty * (issue.clean_price / 100.0 * issue.nominal + issue.accrued_interest)
     amount = cost * (1.0 + commission_rate)
     if amount < cfg.min_position:
         failed.append(f"POSITION_TOO_SMALL: {amount:,.0f} ₽ < {cfg.min_position:,.0f} ₽")

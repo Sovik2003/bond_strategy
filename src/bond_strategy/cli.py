@@ -34,7 +34,15 @@ def run_rebalance_command(args) -> int:
 
     snapshot = load_portfolio(Path(args.portfolio))
     universe, _load_errors = load_market(
-        as_of, strategy_cfg, client, issuers_path=args.issuers, workers=args.workers
+        as_of,
+        strategy_cfg,
+        client,
+        issuers_path=args.issuers,
+        workers=args.workers,
+        cache_root=args.cache_root,
+        page_size=args.page_size,
+        limit=args.limit,
+        progress=lambda message: print(f"  {message}", flush=True),
     )
     by_secid = {issue.secid: issue for issue in universe}
 
@@ -114,6 +122,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--rebalance-config", default=REBALANCE_CONFIG_PATH)
     parser.add_argument("--issuers", default="config/issuers.json")
     parser.add_argument("--workers", type=int, default=6)
+    parser.add_argument(
+        "--cache-root",
+        default="data/cache",
+        help="каталог кэша обогащения; повторный запуск продолжает с места остановки. Пусто — без кэша",
+    )
+    parser.add_argument(
+        "--page-size", type=int, default=25, help="сколько выпусков обогащать за одну страницу"
+    )
     args = parser.parse_args(argv)
 
     if args.command == "rebalance":
