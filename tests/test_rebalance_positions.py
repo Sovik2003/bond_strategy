@@ -68,15 +68,7 @@ def issue(
 
 
 def state(cfg, holdings=(), cash=100_000.0):
-    return PortfolioState(
-        as_of=AS_OF,
-        cash=cash,
-        holdings=list(holdings),
-        issuer_groups=cfg.groups,
-        band_of=cfg.band_for,
-        horizon_years=cfg.horizon_years,
-        low_rating_levels=cfg.low_rating_levels,
-    )
+    return PortfolioState.from_config(AS_OF, cash, list(holdings), cfg)
 
 
 def balanced_state(cfg):

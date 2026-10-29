@@ -57,15 +57,7 @@ def issue(isin="A", issuer="E1", industry="Промышленность", rating
 
 
 def state(cfg, holdings=(), cash=100_000.0, groups=None):
-    return PortfolioState(
-        as_of=AS_OF,
-        cash=cash,
-        holdings=list(holdings),
-        issuer_groups=groups if groups is not None else cfg.groups,
-        band_of=cfg.band_for,
-        horizon_years=cfg.horizon_years,
-        low_rating_levels=cfg.low_rating_levels,
-    )
+    return PortfolioState.from_config(AS_OF, cash, list(holdings), cfg)
 
 
 def codes(checks):
@@ -125,7 +117,16 @@ def test_group_limit_merges_two_issuers(cfg):
         Holding(issue("A2", "E1"), 3),
         Holding(issue("B1", "E2"), 3),
     ]
-    s = state(cfg, holdings, cash=91_000.0, groups=groups)
+    s = PortfolioState(
+        as_of=AS_OF,
+        cash=91_000.0,
+        holdings=holdings,
+        issuer_groups=groups,
+        band_of=cfg.band_for,
+        bands=cfg.bands,
+        horizon_years=cfg.horizon_years,
+        low_rating_levels=cfg.low_rating_levels,
+    )
     exposure = s.exposure()
     assert exposure.group["G"] == pytest.approx(0.09)
     # по отдельности лимит эмитента не нарушен ни у кого

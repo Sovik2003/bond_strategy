@@ -58,15 +58,7 @@ def issue(
 
 
 def state(cfg, holdings=(), cash=100_000.0, as_of=AS_OF):
-    return PortfolioState(
-        as_of=as_of,
-        cash=cash,
-        holdings=list(holdings),
-        issuer_groups=cfg.groups,
-        band_of=cfg.band_for,
-        horizon_years=cfg.horizon_years,
-        low_rating_levels=cfg.low_rating_levels,
-    )
+    return PortfolioState.from_config(as_of, cash, list(holdings), cfg)
 
 
 def test_value_includes_accrued_interest():

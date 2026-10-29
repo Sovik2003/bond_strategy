@@ -81,6 +81,7 @@ class PortfolioState:
         *,
         issuer_groups: dict[str, str] | None = None,
         band_of=None,
+        bands=None,
         horizon_years: float = 5.0,
         low_rating_levels: frozenset[str] | None = None,
     ) -> None:
@@ -89,9 +90,36 @@ class PortfolioState:
         self._holdings = tuple(h for h in holdings if h.quantity > 0)
         self._issuer_groups = issuer_groups or {}
         self._band_of = band_of
+        self._bands = tuple(bands or ())
         self.horizon_years = horizon_years
         self._low_rating_levels = low_rating_levels or frozenset()
         self._value_cache: float | None = None
+
+    @classmethod
+    def from_config(
+        cls,
+        as_of: date,
+        cash: float,
+        holdings: list[Holding],
+        cfg,
+    ) -> "PortfolioState":
+        """Снимок, настроенный по конфигу ребалансировки.
+
+        Единственное место, где снимок узнаёт про пороги: иначе каждый вызов
+        пришлось бы собирать из пяти аргументов, и однажды один из них забыли
+        бы — отчёт считался бы по другой лестнице сроков, чем проверялись
+        лимиты.
+        """
+        return cls(
+            as_of=as_of,
+            cash=cash,
+            holdings=holdings,
+            issuer_groups=cfg.groups,
+            band_of=cfg.band_for,
+            bands=cfg.bands,
+            horizon_years=cfg.horizon_years,
+            low_rating_levels=cfg.low_rating_levels,
+        )
 
     # --- состав ---------------------------------------------------------
 
@@ -143,6 +171,14 @@ class PortfolioState:
         if self._band_of is None:
             return None
         return self._band_of(self.years_to_maturity(issue))
+
+    def bands(self) -> tuple:
+        """Все интервалы лестницы сроков — нужны для оценки отклонения структуры.
+
+        Передаются явно, а не вытаскиваются из `band_of`: `band_of` — метод
+        конфига, и у него нет свойства с полным списком интервалов.
+        """
+        return self._bands
 
     def is_low_rating(self, issue: BondIssue) -> bool:
         return bool(issue.rating) and issue.rating in self._low_rating_levels
@@ -280,6 +316,7 @@ class PortfolioState:
             holdings=new_holdings,
             issuer_groups=self._issuer_groups,
             band_of=self._band_of,
+            bands=self._bands,
             horizon_years=self.horizon_years,
             low_rating_levels=self._low_rating_levels,
         )
