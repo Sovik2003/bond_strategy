@@ -18,6 +18,8 @@ from .eligibility import Check, Eligibility, check_eligibility, check_risk_quali
 from .limits import LimitCheck, check_purchase, existing_breaches, violations
 from .planner import PlanResult, Purchase, Rejected, plan
 from .positions import PositionAssessment, PositionStatus, assess_all
+from .report import RebalanceReport, build_report
+from .runner import build_state, rebalance
 from .snapshot import Exposure, Holding, PortfolioState
 
 __all__ = [
@@ -43,4 +45,8 @@ __all__ = [
     "Purchase",
     "Rejected",
     "plan",
+    "RebalanceReport",
+    "build_report",
+    "build_state",
+    "rebalance",
 ]

@@ -110,6 +110,10 @@ class PlanResult:
     stop_reason: str = ""
     cash_left: float = 0.0
     diagnostics: list[str] = field(default_factory=list)
+    # Состояние портфеля после всех предложенных покупок. Нужно отчёту, и
+    # именно здесь, а не в отчёте: проекция строится теми же объектами
+    # выпусков, что участвовали в подборе.
+    after_state: PortfolioState | None = None
 
 
 class _FlowCache:
@@ -408,6 +412,7 @@ def plan(
     if not eligible:
         result.stop_reason = "Нет выпусков, проходящих требования к покупке (раздел 3)."
         result.cash_left = state.cash
+        result.after_state = state
         return result
 
     current = state
@@ -499,6 +504,7 @@ def plan(
         result.stop_reason = f"Достигнут предел числа покупок за запуск ({cfg.max_purchases})."
 
     result.cash_left = current.cash
+    result.after_state = current
     if not result.purchases and not result.stop_reason:
         result.stop_reason = (
             "Продажа не рекомендуется. Покупки не предложены: подходящих выпусков нет."
