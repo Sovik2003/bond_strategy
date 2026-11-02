@@ -47,6 +47,7 @@ def load_market(
     cache_root: str | None = "data/cache",
     page_size: int = 50,
     limit: int | None = None,
+    held_secids: set[str] | None = None,
     progress: Progress | None = None,
 ) -> tuple[list[BondIssue], dict[str, str]]:
     """Выпуски, доступные на рынке, и ошибки загрузки по ISIN.
@@ -61,6 +62,19 @@ def load_market(
     `limit` ограничивает число обогащаемых выпусков. Это не «режим для тестов»
     только: на медленном канале полезно сначала собрать часть рынка, посмотреть
     отчёт и продолжить позже — кэш делает второй запуск продолжением первого.
+
+    `held_secids` — бумаги, которые уже есть в портфеле. Они загружаются в обход
+    отсева, и это не поблажка, а требование смысла.
+
+    Отсев скринера отвечает на вопрос «стоит ли покупать», и его пороги (срок до
+    погашения, оферта, листинг) относятся к решению о покупке. Но бумага, которая
+    уже куплена, никуда не денется от того, что до погашения осталось 34 дня или
+    что объявлена оферта: её всё равно надо оценить — посчитать долю в портфеле,
+    дюжину вклада в дюрацию, размер купона. Отбросив её на входе, программа
+    сообщала «не найдено на рынке» про бумагу, которая на рынке есть.
+
+    Продавать такую бумагу при этом никто не предлагает: причины продажи живут в
+    `check_risk_quality` и не пересекаются с порогами покупки.
     """
     say = progress or _silent
     cache = MarketCache(cache_root, MarketCache.make_fingerprint(as_of, strategy_cfg.config_id)) if cache_root else None
@@ -70,6 +84,23 @@ def load_market(
 
     passed, stats = screen(rows, as_of, strategy_cfg)
     say(f"Прошло отсев: {len(passed)} из {len(rows)}")
+
+    # Бумаги из портфеля — в начало и в обход отсева. В начало, потому что при
+    # `limit` они не должны отсекаться первыми: оценка того, что уже куплено,
+    # важнее поиска нового.
+    if held_secids:
+        passed_ids = {row["SECID"] for row in passed}
+        held_rows = [row for row in rows if row["SECID"] in held_secids]
+        bypassed = [row for row in held_rows if row["SECID"] not in passed_ids]
+        if bypassed:
+            passed = bypassed + passed
+            say(
+                f"Из портфеля взяты в обход отсева: "
+                f"{', '.join(row['SECID'] for row in bypassed)}"
+            )
+        elsewhere = held_secids - {row["SECID"] for row in held_rows}
+        if elsewhere:
+            say(f"Нет на доске: {', '.join(sorted(elsewhere))}")
     if limit is not None:
         passed = passed[:limit]
         say(f"Ограничение выборки: {len(passed)} выпусков")

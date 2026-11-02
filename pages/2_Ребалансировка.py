@@ -114,6 +114,9 @@ def run_cached(
         cache_root=cache_root,
         page_size=page_size,
         limit=limit,
+        # Позиции грузятся в обход отсева скринера: их надо оценить, даже если
+        # до погашения мало дней или объявлена оферта.
+        held_secids={secid for secid, _ in positions},
     )
     by_secid = {issue.secid: issue for issue in universe}
 

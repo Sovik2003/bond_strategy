@@ -255,3 +255,50 @@ def test_zero_yield_blocks_purchase(cfg):
     """Ровно нулевая доходность — тоже не покупка: деньги работали бы впустую."""
     result = check_eligibility(issue(), cfg, AS_OF)
     assert result.passed or "EXCLUDED_NEGATIVE_YIELD" in codes(result)
+
+
+# --- бумаги из портфеля не теряются на отсеве ------------------------------
+
+
+def test_held_secids_bypass_screen(monkeypatch):
+    """Позиция из портфеля грузится, даже если не проходит отсев скринера.
+
+    Пороги скринера — про решение о покупке: срок до погашения, оферта,
+    листинг. Бумага, которая уже куплена, никуда не денется от того, что до
+    погашения осталось 34 дня. Сообщать про неё «не найдено на рынке» — врать:
+    на рынке она есть, просто не проходит фильтр покупки.
+    """
+    from bond_strategy.rebalance import iss as iss_module
+    from bond_strategy.universe import UniverseStats
+
+    board = [
+        # обычная бумага, проходит отсев
+        {"SECID": "GOOD1", "PREVPRICE": 100.0, "ACCRUEDINT": 5.0},
+        # из портфеля: до погашения 34 дня, отсев её отбросит
+        {"SECID": "HELD1", "PREVPRICE": 100.0, "ACCRUEDINT": 5.0},
+    ]
+
+    def fake_screen(rows, as_of, cfg):
+        passed = [row for row in rows if row["SECID"] != "HELD1"]
+        return passed, UniverseStats(board_rows=len(rows))
+
+    monkeypatch.setattr(iss_module, "fetch_board", lambda client, board_name=None: board)
+    monkeypatch.setattr(iss_module, "screen", fake_screen)
+    captured: list[str] = []
+
+    # Проверяем, какие SECID дошли до обогащения.
+    def spy(client, rows, *a, **kw):
+        captured.extend(r["SECID"] for r in rows)
+        return [], None, []
+
+    monkeypatch.setattr(iss_module, "build_universe", spy)
+
+    iss_module.load_market(
+        date(2026, 10, 26),
+        cfg,
+        client=None,
+        cache_root=None,
+        held_secids={"HELD1"},
+    )
+    assert "HELD1" in captured
+    assert "GOOD1" in captured

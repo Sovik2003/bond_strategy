@@ -42,6 +42,9 @@ def run_rebalance_command(args) -> int:
         cache_root=args.cache_root,
         page_size=args.page_size,
         limit=args.limit,
+        # Позиции из файла грузятся в обход отсева скринера: их надо оценить,
+        # даже если до погашения мало дней или объявлена оферта.
+        held_secids={p["secid"] for p in snapshot["positions"]},
         progress=lambda message: print(f"  {message}", flush=True),
     )
     by_secid = {issue.secid: issue for issue in universe}
