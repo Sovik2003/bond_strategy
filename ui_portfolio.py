@@ -58,16 +58,36 @@ def render_portfolio_form(
             value=float(saved["cash"]),
             step=1000.0,
         )
-        frame = pd.DataFrame(saved["positions"], columns=["secid", "quantity", "market_value"])
+        frame = pd.DataFrame(
+            [
+                {**p, "remove": False}
+                for p in saved["positions"]
+            ],
+            columns=["remove", "secid", "quantity", "market_value"],
+        )
+        # Колонка «Продано» вместо надежды на догадку. Редактор таблицы в
+        # Streamlit удаляет строку только по Shift+Space и Delete — это нигде не
+        # написано и не обнаруживается мышью. Пользователь, продавший бумагу,
+        # пробовал стереть ячейки или поставить количество 0, получал ошибку
+        # «заполните количество» и не мог сохранить портфель вообще.
         editor = st.data_editor(
             frame,
             num_rows="dynamic",
             hide_index=True,
             width="stretch",
             column_config={
+                "remove": st.column_config.CheckboxColumn(
+                    "Продано", help="Отметьте, чтобы убрать позицию из портфеля", default=False
+                ),
                 "secid": st.column_config.TextColumn("SECID / ISIN", required=True),
+                # min_value=0, а не 1: «продал всё» — законный ответ, и раньше
+                # редактор не давал его ввести.
                 "quantity": st.column_config.NumberColumn(
-                    "Количество, шт.", min_value=1, step=1, required=True
+                    "Количество, шт.",
+                    min_value=0,
+                    step=1,
+                    required=True,
+                    help="0 — позиция продана полностью и будет убрана",
                 ),
                 "market_value": st.column_config.NumberColumn(
                     "Стоимость позиции с НКД, ₽", min_value=0.01, step=100.0, required=True
@@ -84,6 +104,17 @@ def render_portfolio_form(
             st.success(
                 "Портфель сохранён. Запустите расчёт, чтобы учесть изменения."
             )
+            # Убранные позиции называются явно. Молчаливое исчезновение строки
+            # неотличимо от ошибки ввода: человек не знает, сохранилось ли
+            # намеренное удаление или он что-то стёр случайно.
+            after_ids = {p["secid"] for p in validated["positions"]}
+            gone = [p for p in saved["positions"] if p["secid"] not in after_ids]
+            if gone:
+                st.info(
+                    "Убраны из портфеля: "
+                    + ", ".join(p["secid"] for p in gone)
+                    + f". Осталось позиций: {len(validated['positions'])}."
+                )
         except (ValueError, OSError) as exc:
             st.error(f"Портфель не сохранён: {exc}")
 

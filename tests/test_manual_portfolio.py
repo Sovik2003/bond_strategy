@@ -87,3 +87,70 @@ def test_security_name_reaches_output_and_holdings(monkeypatch):
     r = run_pipeline(date(2026, 10, 26), cfg, object(), workers=1, cash=40000,
                      holdings=[{'secid': 'HELD', 'quantity': 10, 'market_value': 10000}])
     assert r.summary['portfolio']['holdings'][0]['security_name'] == 'ТестБум 1'
+
+
+# --- удаление проданной позиции --------------------------------------------
+#
+# Три способа, и все три должны работать: пользователь пробует их в
+# произвольном порядке. Раньше каждый давал ошибку «заполните количество и
+# стоимость больше нуля», и портфель не сохранялся вовсе.
+
+def test_sold_checkbox_removes_position():
+    """Галочка «Продано» — основной путь, он же виден в интерфейсе."""
+    snapshot = validate_portfolio(50_000, [
+        {"secid": "RU000A10AA10", "quantity": 10, "market_value": 10_500, "remove": True},
+        {"secid": "RU000A0ZYU05", "quantity": 5, "market_value": 5_000, "remove": False},
+    ])
+    assert [p["secid"] for p in snapshot["positions"]] == ["RU000A0ZYU05"]
+
+
+def test_zero_quantity_removes_position():
+    """Количество 0 — естественное «продал всё»."""
+    snapshot = validate_portfolio(50_000, [
+        {"secid": "RU000A10AA10", "quantity": 0, "market_value": 10_500},
+    ])
+    assert snapshot["positions"] == []
+
+
+def test_blank_row_is_skipped_not_rejected():
+    """Пустая строка от кнопки «+» — не ошибка, а передумал добавлять.
+
+    data_editor отдаёт незаполненную строку как None или NaN. Раньше это
+    блокировало сохранение всего портфеля из-за одной пустой строки.
+    """
+    snapshot = validate_portfolio(50_000, [
+        {"secid": None, "quantity": None, "market_value": None},
+        {"secid": "RU000A0ZYU05", "quantity": 5, "market_value": 5_000},
+    ])
+    assert [p["secid"] for p in snapshot["positions"]] == ["RU000A0ZYU05"]
+
+    nan_snapshot = validate_portfolio(50_000, [
+        {"secid": float("nan"), "quantity": float("nan"), "market_value": float("nan")},
+    ])
+    assert nan_snapshot["positions"] == []
+
+
+def test_every_position_can_be_removed():
+    """Портфель можно опустеть полностью — это законное состояние."""
+    snapshot = validate_portfolio(0, [
+        {"secid": "RU000A10AA10", "quantity": 10, "market_value": 10_500, "remove": True},
+        {"secid": "RU000A0ZYU05", "quantity": 0, "market_value": 5_000},
+    ])
+    assert snapshot == {"cash": 0.0, "positions": []}
+
+
+def test_partial_row_still_rejected():
+    """Опечатка всё ещё ловится: SECID есть, а стоимости нет.
+
+    Отличать «удалил» от «недозаполнил» обязательно: молчаливое удаление
+    позиции из-за пропущенной ячейки — та же ошибка, только тихая.
+    """
+    with pytest.raises(ValueError):
+        validate_portfolio(50_000, [{"secid": "RU000A10AA10", "quantity": 10}])
+
+
+def test_negative_quantity_rejected():
+    with pytest.raises(ValueError):
+        validate_portfolio(50_000, [
+            {"secid": "RU000A10AA10", "quantity": -5, "market_value": 10_500},
+        ])
