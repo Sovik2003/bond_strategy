@@ -13,7 +13,7 @@ from datetime import date
 
 import pytest
 
-from bond_strategy.models import BondIssue
+from bond_strategy.models import AmortizationPayment, BondIssue
 from bond_strategy.rebalance.config import load_rebalance_config
 from bond_strategy.rebalance.eligibility import check_eligibility, check_risk_quality
 
@@ -192,3 +192,66 @@ def test_offer_does_not_make_position_a_sell_candidate(cfg):
 def test_floating_coupon_does_not_make_position_a_sell_candidate(cfg):
     result = check_risk_quality(issue(coupon_type="FLOAT"), cfg, AS_OF)
     assert result.passed
+
+
+# --- амортизация и доходность ---------------------------------------------
+
+
+def test_started_amortization_blocks_purchase(cfg):
+    """Номинал уже ниже изначального — амортизация началась, покупка запрещена."""
+    item = issue(nominal=50.0, initial_nominal=1000.0)
+    assert item.amortization_started()
+    assert codes(check_eligibility(item, cfg, AS_OF)) == ["EXCLUDED_AMORTIZATION_STARTED"]
+
+
+def test_future_amortization_does_not_block_purchase(cfg):
+    """Плановая амортизация впереди не мешает: номинал ещё целый."""
+    item = issue(nominal=1000.0, initial_nominal=1000.0)
+    item.amortization = [AmortizationPayment(date(2027, 6, 1), 0.25)]
+    assert not item.amortization_started()
+    assert check_eligibility(item, cfg, AS_OF).passed, check_eligibility(item, cfg, AS_OF).reason
+
+
+def test_amortization_check_can_be_disabled(cfg):
+    """Флаг в конфиге отключает проверку — поведение настраиваемое, а не жёсткое."""
+    import dataclasses
+
+    loose = dataclasses.replace(cfg, reject_started_amortization=False)
+    item = issue(nominal=50.0, initial_nominal=1000.0)
+    assert check_eligibility(item, loose, AS_OF).passed
+
+
+def test_negative_yield_blocks_purchase(cfg):
+    """Цена выше суммы всех выплат — убыток гарантирован, покупать нельзя."""
+    # цена 139% при купоне 0,01% и погашении через год: вернётся меньше, чем вложено
+    item = issue(clean_price=139.24, accrued_interest=0.03, coupon_rate=0.0001,
+                 coupon_frequency=1, maturity_date=date(2027, 7, 1))
+    result = check_eligibility(item, cfg, AS_OF)
+    assert not result.passed
+    assert codes(result) == ["EXCLUDED_NEGATIVE_YIELD"]
+    assert "убыточна" in result.reason
+
+
+def test_uncomputable_yield_blocks_purchase(cfg):
+    """Без купонной ставки доходность не считается — бумага не проходит."""
+    item = issue(coupon_rate=None)
+    assert codes(check_eligibility(item, cfg, AS_OF)) == ["EXCLUDED_NO_YIELD"]
+
+
+def test_positive_yield_passes(cfg):
+    item = issue(clean_price=98.5, accrued_interest=5.0, coupon_rate=0.16)
+    assert check_eligibility(item, cfg, AS_OF).passed
+
+
+def test_yield_check_can_be_disabled(cfg):
+    import dataclasses
+
+    loose = dataclasses.replace(cfg, require_positive_yield=False)
+    item = issue(coupon_rate=None)
+    assert check_eligibility(item, loose, AS_OF).passed
+
+
+def test_zero_yield_blocks_purchase(cfg):
+    """Ровно нулевая доходность — тоже не покупка: деньги работали бы впустую."""
+    result = check_eligibility(issue(), cfg, AS_OF)
+    assert result.passed or "EXCLUDED_NEGATIVE_YIELD" in codes(result)

@@ -46,12 +46,15 @@
   },
 
   "eligibility": {
-    "require_unknown_flags_verified": false,
-    "_comment_flags": "Субординация и право эмитента на досрочный выкуп из ISS не приходят. False — такие выпуски допускаются с замечанием в отчёте; True — блокируются.",
     "min_data_completeness": 1.0,
+    "require_unknown_flags_verified": false,
     "require_fixed_coupon": true,
     "require_maturity": true,
-    "reject_offer": true
+    "reject_offer": true,
+    "reject_started_amortization": true,
+    "_comment_amortization": "Запрещает покупку бумаг, у которых амортизация УЖЕ началась: текущий номинал ниже изначального. Плановая амортизация в будущем не мешает — такие бумаги остаются. Признак — расхождение FACEVALUE и INITIALFACEVALUE, а не наличие платежей в графике: график содержит только предстоящие выплаты.",
+    "require_positive_yield": true,
+    "_comment_yield": "Запрещает покупку, если доходность к погашению не вычислена или не положительна. Убыточная бумага не должна попадать в рекомендации: купить за 139% и получить 100% при погашении — гарантированный убыток, даже если купон формально есть."
   },
 
   "planner": {

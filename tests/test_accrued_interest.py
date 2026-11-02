@@ -116,3 +116,24 @@ def test_yield_matches_schedule_payouts():
     # 2026-12, 2027-06, 2027-12, 2028-06, 2028-12, 2029-06 — шесть выплат
     assert len(coupons) == 6
     assert all(f.amount_per_bond == pytest.approx(80.0) for f in coupons)
+
+
+def test_amortization_started_is_detected_by_nominal_gap():
+    """Признак начавшейся амортизации — текущий номинал ниже изначального.
+
+    По списку `amortization` этого не понять: там только ПРЕДСТОЯЩИЕ платежи.
+    У бумаги с номиналом 50 ₽ из 1000 ₽ список может быть пустым, а половина
+    номинала уже выплачена.
+    """
+    whole = issue(nominal=1000.0, initial_nominal=1000.0)
+    assert not whole.amortization_started()
+
+    paid = issue(nominal=50.0, initial_nominal=1000.0)
+    assert paid.amortization_started()
+    assert paid.amortization == []
+
+
+def test_amortization_started_handles_zero_initial():
+    """Некорректный изначальный номинал не должен давать деления на ноль."""
+    broken = issue(nominal=1000.0, initial_nominal=0.0)
+    assert not broken.amortization_started()

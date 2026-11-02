@@ -114,7 +114,16 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument("--date", default=date.today().isoformat(), help="дата расчёта, YYYY-MM-DD")
-    parser.add_argument("--limit", type=int, default=20, help="сколько выпусков разбирать детально")
+    parser.add_argument(
+        "--limit",
+        type=int,
+        default=None,
+        help=(
+            "сколько выпусков разбирать детально; по умолчанию весь рынок. "
+            "Для перебора покупок ограничение вредит: чем меньше выпусков "
+            "загружено, тем беднее выбор и тем хуже заполняется структура"
+        ),
+    )
     parser.add_argument("--config", default=CONFIG_PATH)
     parser.add_argument("--raw-root", default="data/raw", help="куда сохранять сырые ответы ISS")
     parser.add_argument("--out", default=None, help="путь для JSON-отчёта")

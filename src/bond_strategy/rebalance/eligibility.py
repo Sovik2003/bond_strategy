@@ -24,6 +24,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date
 
+from ..analytics.yield_calc import calculate_ytm
 from ..ingestion.ratings import _RANK
 from ..models import BondIssue
 from .config import RebalanceConfig
@@ -149,6 +150,36 @@ def check_eligibility(issue: BondIssue, cfg: RebalanceConfig, as_of: date) -> El
             result.reject("EXCLUDED_OFFER", f"Действует оферта от {issue.offer_date.isoformat()}")
         elif issue.status.get("offer") is not None and issue.status["offer"].blocks_buy:
             result.reject("EXCLUDED_OFFER", "Условия оферты не подтверждены")
+
+    # Амортизация, которая уже началась. Плановая амортизация в будущем не
+    # мешает: номинал ещё целый, и бумага ведёт себя как обычная. Отказ — только
+    # когда часть номинала уже выплачена, потому что тогда купон платится от
+    # остатка, а цена котируется в процентах от него же: та же цифра «100%»
+    # означает другую сумму, и сравнивать такую бумагу с остальными напрямую
+    # нельзя.
+    if cfg.reject_started_amortization and issue.amortization_started():
+        result.reject(
+            "EXCLUDED_AMORTIZATION_STARTED",
+            f"Амортизация уже началась: номинал {issue.nominal:g} ₽ "
+            f"из {issue.initial_nominal:g} ₽",
+        )
+
+    # Доходность к погашению. Проверка стоит здесь, а не в планировщике: смысл
+    # допуска — не пускать в подборку бумагу, которую нельзя оценить или которая
+    # заведомо убыточна. Купить за 139% номинала и получить 100% при погашении —
+    # гарантированный убыток, даже если купон формально есть.
+    if cfg.require_positive_yield:
+        yield_result = calculate_ytm(issue, as_of)
+        if not yield_result.ok or yield_result.ytm is None:
+            result.reject(
+                "EXCLUDED_NO_YIELD",
+                f"Доходность не рассчитана: {yield_result.message}",
+            )
+        elif yield_result.ytm <= 0:
+            result.reject(
+                "EXCLUDED_NEGATIVE_YIELD",
+                f"Доходность к погашению {yield_result.ytm:.2%} — покупка убыточна",
+            )
 
     rating_check = _rating_check(issue, cfg, as_of)
     if rating_check is not None:

@@ -70,6 +70,8 @@ class RebalanceConfig:
     require_fixed_coupon: bool
     require_maturity: bool
     reject_offer: bool
+    reject_started_amortization: bool
+    require_positive_yield: bool
     groups: dict[str, str] = field(default_factory=dict)
 
     def band_for(self, years: float | None) -> LadderBand | None:
@@ -163,5 +165,9 @@ def load_rebalance_config(path: str | Path) -> RebalanceConfig:
         require_fixed_coupon=bool(eligibility.get("require_fixed_coupon", True)),
         require_maturity=bool(eligibility.get("require_maturity", True)),
         reject_offer=bool(eligibility.get("reject_offer", True)),
+        # По умолчанию включены: убыточная покупка и бумага с уже прошедшей
+        # амортизацией — не то, что имеет смысл предлагать в подборке.
+        reject_started_amortization=bool(eligibility.get("reject_started_amortization", True)),
+        require_positive_yield=bool(eligibility.get("require_positive_yield", True)),
         groups={str(k): str(v) for k, v in groups_raw.items()},
     )
