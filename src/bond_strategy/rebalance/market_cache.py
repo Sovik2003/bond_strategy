@@ -18,6 +18,7 @@ config_id. Без отпечатка кэш от прошлой даты отд�
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import json
 from datetime import date
 from enum import Enum
@@ -92,9 +93,36 @@ class MarketCache:
         self._load()
 
     @staticmethod
-    def make_fingerprint(as_of: date, config_id: str) -> str:
-        """Отпечаток условий: дата расчёта и конфигурация."""
-        return f"{as_of.isoformat()}-{config_id}"
+    def make_fingerprint(
+        as_of: date, config_id: str, issuers_digest: str = ""
+    ) -> str:
+        """Отпечаток условий: дата расчёта, конфигурация и справочник эмитентов.
+
+        Справочник входит в отпечаток не для полноты. Отрасль и название
+        эмитента попадают в `BondIssue` при обогащении, то есть оседают в кэше.
+        Без учёта справочника правка отраслей не действовала бы на уже
+        загруженный рынок: кэш отдал бы выпуски со старым «Не определена», и
+        отчёт показал бы прежнюю картину, хотя файл исправлен.
+
+        Хеш, а не путь или время правки: содержимое меняется редко, а
+        пересчитывать хеш дёшево, и он не зависит от часового пояса файловой
+        системы.
+        """
+        digest = f"-{issuers_digest}" if issuers_digest else ""
+        return f"{as_of.isoformat()}-{config_id}{digest}"
+
+    @staticmethod
+    def issuers_digest(path: str | Path) -> str:
+        """Короткий хеш справочника эмитентов. Пустой файл — пустая строка.
+
+        Отсутствующий файл даёт пустую строку, а не исключение: справочник может
+        быть ещё не создан, и это законное состояние — не повод ронять прогон.
+        """
+        try:
+            body = Path(path).read_bytes()
+        except OSError:
+            return ""
+        return hashlib.sha256(body).hexdigest()[:8]
 
     def _load(self) -> None:
         if not self.path.exists():

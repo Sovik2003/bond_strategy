@@ -231,8 +231,27 @@ def test_rating_from_directory(description, bondization, cfg):
     assert issue.issuer_name == "Тестовый эмитент"
 
 
-def test_empty_issuer_directory_is_valid():
-    assert load_issuers("config/issuers.json") == {}
+def test_issuer_directory_loads_industries():
+    """Справочник заполнен отраслями — иначе лимит по отрасли не работает.
+
+    ISS не отдаёт отрасль ни в описании бумаги, ни в карточке эмитента, поэтому
+    это единственный источник. Пока справочник был пуст, все 302 бумаги попадали
+    в одну категорию «Не определена»: превышение по отрасли в отчёте выглядело
+    бессмысленным — непонятно, какая отрасль его вызвала.
+    """
+    issuers = load_issuers("config/issuers.json")
+    assert issuers, "справочник пуст — отраслевой лимит проверить нечем"
+    undefined = [i for i in issuers.values() if i.industry == "Не определена"]
+    assert not undefined, f"без отрасли: {[i.emitter_id for i in undefined]}"
+    # отраслей должно быть несколько, иначе группировка бессмысленна
+    assert len({i.industry for i in issuers.values()}) >= 5
+
+
+def test_empty_issuer_directory_is_valid(tmp_path):
+    """Пустой справочник — законное состояние, а не сбой: файл может быть новым."""
+    empty = tmp_path / "issuers.json"
+    empty.write_text('{"issuers": []}', encoding="utf-8")
+    assert load_issuers(str(empty)) == {}
 
 
 def test_quality_without_issuer_is_medium():

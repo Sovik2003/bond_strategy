@@ -26,6 +26,7 @@ from datetime import date
 from typing import Callable
 
 from ..config import StrategyConfig
+from ..ingestion.mapping import load_issuers
 from ..ingestion.moex import BOARD_CORP, IssClient, fetch_board
 from ..models import BondIssue
 from ..universe import build_universe, screen
@@ -77,7 +78,16 @@ def load_market(
     `check_risk_quality` и не пересекаются с порогами покупки.
     """
     say = progress or _silent
-    cache = MarketCache(cache_root, MarketCache.make_fingerprint(as_of, strategy_cfg.config_id)) if cache_root else None
+    cache = (
+        MarketCache(
+            cache_root,
+            MarketCache.make_fingerprint(
+                as_of, strategy_cfg.config_id, MarketCache.issuers_digest(issuers_path)
+            ),
+        )
+        if cache_root
+        else None
+    )
 
     rows = fetch_board(client, BOARD_CORP)
     say(f"Доска: {len(rows)} строк")
@@ -158,5 +168,30 @@ def load_market(
     # данных, а не источник списка: список задаёт доска и отсев.
     allowed = {row["SECID"] for row in passed}
     issues = [issue for issue in issues if issue.secid in allowed]
+
+    # Справочник применяется заново поверх загруженного. Отрасль и название
+    # эмитента приходят из `config/issuers.json`, но попадают в объект при
+    # обогащении — то есть кэшируются вместе с ним. Без переприменения правка
+    # справочника не действовала бы на уже загруженный рынок: выпуски из кэша
+    # пришли бы со старой отраслью, и отчёт показал бы прежнюю картину.
+    #
+    # Дешевле, чем заставлять перекачивать рынок ради одной строки в справочнике:
+    # присваивание в памяти вместо сотен сетевых запросов.
+    try:
+        directory = load_issuers(issuers_path)
+    except (OSError, ValueError):
+        directory = {}
+    if directory:
+        refreshed = 0
+        for issue in issues:
+            record = directory.get(issue.issuer_id)
+            if record is None:
+                continue
+            if (issue.industry, issue.issuer_name) != (record.industry, record.name):
+                refreshed += 1
+            issue.industry = record.industry
+            issue.issuer_name = record.name
+        if refreshed:
+            say(f"Справочник эмитентов применён заново: {refreshed} выпусков")
 
     return issues, errors

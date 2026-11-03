@@ -397,6 +397,75 @@ else:
 st.divider()
 st.subheader("Структура: до и после")
 
+# --------------------------------------------------------------------------
+# Диаграмма по отраслям
+# --------------------------------------------------------------------------
+
+industry_block = next(
+    (b for b in structure if b.get("code") == "industry"), None
+)
+industry_rows = (industry_block or {}).get("rows") or []
+
+if industry_rows:
+    industry_limit = industry_block.get("limit")
+    # Пустая категория не рисуется: на диаграмме она занимала бы место
+    # наравне с реальными, хотя означает «отрасль неизвестна».
+    shown = [r for r in industry_rows if (r.get("after") or 0) > 0]
+
+    if shown:
+        st.markdown("**Доли по отраслям, % от портфеля**")
+        chart_data = pd.DataFrame(
+            {
+                "Отрасль": [r.get("label") or "—" for r in shown],
+                "До": [round((r.get("before") or 0) * 100, 2) for r in shown],
+                "После": [round((r.get("after") or 0) * 100, 2) for r in shown],
+            }
+        ).set_index("Отрасль")
+
+        left, right = st.columns(2)
+        with left:
+            st.caption("Сейчас")
+            st.bar_chart(
+                chart_data[["До"]], horizontal=True, height=max(180, 30 * len(shown)),
+                color="#9aa6b2",
+            )
+        with right:
+            st.caption("После предложенных покупок")
+            st.bar_chart(
+                chart_data[["После"]], horizontal=True, height=max(180, 30 * len(shown)),
+                color="#3f7fbf",
+            )
+
+        if industry_limit:
+            st.caption(
+                f"Лимит на отрасль — {fmt_pct(industry_limit, 0)} от портфеля. "
+                "Столбики длиннее лимита означают превышение."
+            )
+
+        over = [r for r in shown if r.get("over_limit")]
+        if over:
+            st.warning(
+                "Превышен лимит по отрасли: "
+                + "; ".join(
+                    f"{r.get('label')} — {fmt_pct(r.get('after'))} при лимите {fmt_pct(industry_limit, 0)}"
+                    for r in over
+                )
+            )
+        elif industry_limit:
+            st.caption("Ни одна отрасль лимит не превышает.")
+
+    unknown = next(
+        (r for r in industry_rows if (r.get("label") or "") == "Не определена"), None
+    )
+    if unknown and (unknown.get("after") or 0) > 0:
+        # Об этом стоит сказать прямо: диаграмма без этой оговорки выглядит
+        # полной, хотя часть портфеля в ней не разложена по отраслям.
+        st.info(
+            f"Отрасль не определена для {fmt_pct(unknown.get('after'))} портфеля — "
+            "эти выпуски не разложены по секторам. Отрасль задаётся в "
+            "`config/issuers.json`: MOEX ISS её не отдаёт."
+        )
+
 SLICE_TITLES = {
     "issue": "Выпуски",
     "issuer": "Эмитенты",
