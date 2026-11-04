@@ -150,10 +150,26 @@ def build_report(
     target_bands = {b.code: b.target for b in cfg.bands if b.target is not None}
     band_labels = {b.code: b.label for b in cfg.bands}
 
+    # Названия для разрезов «Эмитенты» и «Группы компаний». Доли считаются по
+    # идентификаторам, но в отчёте они превращались в «Эмитент 15684»: номер
+    # ничего не говорит инвестору. Берутся из обоих состояний — после покупок
+    # появляются эмитенты, которых в исходном портфеле не было.
+    issuer_labels: dict[str, str] = {}
+    group_labels: dict[str, str] = {}
+    for snapshot_state in (state, after_state):
+        issuer_labels.update(snapshot_state.issuer_labels())
+        group_labels.update(snapshot_state.group_labels())
+
     structure = [
         _slice_rows("issue", "Выпуски", before_exp.issue, after_exp.issue, limit_labels["issue"]),
-        _slice_rows("issuer", "Эмитенты", before_exp.issuer, after_exp.issuer, limit_labels["issuer"]),
-        _slice_rows("group", "Группы компаний", before_exp.group, after_exp.group, limit_labels["group"]),
+        _slice_rows(
+            "issuer", "Эмитенты", before_exp.issuer, after_exp.issuer,
+            limit_labels["issuer"], labels=issuer_labels,
+        ),
+        _slice_rows(
+            "group", "Группы компаний", before_exp.group, after_exp.group,
+            limit_labels["group"], labels=group_labels,
+        ),
         _slice_rows(
             "industry", "Отрасли", before_exp.industry, after_exp.industry, limit_labels["industry"]
         ),

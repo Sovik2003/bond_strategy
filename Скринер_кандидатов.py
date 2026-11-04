@@ -4,7 +4,7 @@
 config/strategy.json на диске не изменяется.
 
 Запуск:
-    PYTHONPATH=src streamlit run app.py
+    PYTHONPATH=src streamlit run Скринер_кандидатов.py
 """
 from __future__ import annotations
 
@@ -138,7 +138,7 @@ def fmt_text(value) -> str:
 # Экран 1 — параметры прогона
 # --------------------------------------------------------------------------
 
-st.set_page_config(page_title="bond_strategy", page_icon="📊", layout="wide")
+st.set_page_config(page_title="Скринер кандидатов", page_icon="📊", layout="wide")
 
 if "portfolio_snapshot" not in st.session_state:
     try:
@@ -147,7 +147,7 @@ if "portfolio_snapshot" not in st.session_state:
         st.error(f"Не удалось прочитать сохранённый портфель: {exc}. Файл не изменён.")
         st.stop()
 
-st.title("bond_strategy")
+st.title("Скринер кандидатов")
 st.caption("Скринер кандидатов. Ребалансировка готового портфеля — на странице «Ребалансировка» слева.")
 st.subheader("Купленные позиции")
 st.caption("Введите SECID с борда TQCB, количество бумаг и текущую стоимость всей позиции в рублях с НКД. Цены нужно обновлять вручную. Сохранение — только на этом компьютере.")

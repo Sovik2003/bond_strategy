@@ -3,7 +3,7 @@ setlocal enabledelayedexpansion
 chcp 65001 >nul
 
 rem Launches the bond_strategy Streamlit UI on Windows.
-rem Place this file in the repository root (next to app.py, pyproject.toml).
+rem Place this file in the repository root (next to Скринер_кандидатов.py, pyproject.toml).
 
 cd /d "%~dp0"
 
@@ -81,6 +81,6 @@ echo Press Ctrl+C in this window to stop the server.
 echo.
 
 set PYTHONPATH=src
-streamlit run app.py
+streamlit run Скринер_кандидатов.py
 
 endlocal

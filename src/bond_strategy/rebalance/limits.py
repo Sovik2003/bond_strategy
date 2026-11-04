@@ -201,10 +201,31 @@ def existing_breaches(state: PortfolioState, cfg: RebalanceConfig) -> dict[str, 
 
     for isin, share in exposure.issue.items():
         mark("ISSUE_LIMIT", f"Выпуск {isin}", share, limits.issue_max_share, isin)
+    # Названия вместо идентификаторов: «Эмитент 15684 — 15.4%» не сообщает
+    # инвестору ничего, а именно эту строку он читает в предупреждении.
+    names = state.issuer_labels()
     for issuer_id, share in exposure.issuer.items():
-        mark("ISSUER_LIMIT", f"Эмитент {issuer_id}", share, limits.issuer_max_share, issuer_id)
+        mark(
+            "ISSUER_LIMIT",
+            f"Эмитент «{names.get(issuer_id, issuer_id)}»",
+            share,
+            limits.issuer_max_share,
+            issuer_id,
+        )
+    group_names = state.group_labels()
     for gid, share in exposure.group.items():
-        mark("GROUP_LIMIT", f"Группа {gid}", share, limits.group_max_share, gid)
+        # «Группа» пишется всегда, даже когда в группе один эмитент. Пока карта
+        # `issuer_groups` пуста, группа совпадает с эмитентом, и обе проверки
+        # нарушаются одинаково. Если назвать их одинаково, читатель увидит две
+        # идентичные строки и решит, что отчёт задвоился. Разные слова
+        # показывают, что проверок действительно две и лимиты у них разные.
+        mark(
+            "GROUP_LIMIT",
+            f"Группа «{group_names.get(gid, gid)}»",
+            share,
+            limits.group_max_share,
+            gid,
+        )
     for industry, share in exposure.industry.items():
         mark("INDUSTRY_LIMIT", f"Отрасль «{industry}»", share, limits.industry_max_share, industry)
 

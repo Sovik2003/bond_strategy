@@ -137,6 +137,29 @@ class PortfolioState:
     def group_of(self, issue: BondIssue) -> str:
         return self._issuer_groups.get(issue.issuer_id, issue.issuer_id)
 
+    def issuer_labels(self) -> dict[str, str]:
+        """EMITTER_ID -> название эмитента для отчёта.
+
+        Доли считаются по идентификатору, но показывать инвестору номер
+        бессмысленно: «Эмитент 15684 — 15.4%» не говорит ничего. Имя уже лежит
+        в выпуске, его достаточно собрать в словарь.
+        """
+        return {h.issue.issuer_id: h.issue.issuer_name for h in self._holdings}
+
+    def group_labels(self) -> dict[str, str]:
+        """Ключ группы -> человеческое название.
+
+        Ключом группы служит либо EMITTER_ID из карты `issuer_groups`, либо
+        собственно метка владельца, если её задали словами. В первом случае
+        подставляется название эмитента, во втором ключ уже читаемый и
+        остаётся как есть.
+        """
+        names = self.issuer_labels()
+        return {
+            key: names.get(key, key)
+            for key in {self.group_of(h.issue) for h in self._holdings}
+        }
+
     # --- стоимость ------------------------------------------------------
 
     @property

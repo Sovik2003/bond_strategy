@@ -154,3 +154,29 @@ def test_negative_quantity_rejected():
         validate_portfolio(50_000, [
             {"secid": "RU000A10AA10", "quantity": -5, "market_value": 10_500},
         ])
+
+
+# --- имя страницы в боковом меню -------------------------------------------
+
+
+def test_scanner_page_is_named_for_humans():
+    """Главная страница называется по-человечески, а не «app».
+
+    Streamlit берёт подпись в меню из имени файла, поэтому имя файла — это и
+    есть название пункта. `app.py` давал пункт «app» рядом с «Ребалансировка»:
+    два пункта меню на разных языках и разной степени понятности.
+    """
+    from pathlib import Path
+
+    from streamlit.source_util import page_icon_and_name
+
+    root = Path(__file__).resolve().parents[1]
+    candidates = [
+        p for p in root.glob("*.py")
+        if p.name not in {"conftest.py", "portfolio_inputs.py", "ui_portfolio.py"}
+    ]
+    labelled = {p.name: page_icon_and_name(p)[1] for p in candidates}
+
+    assert "app.py" not in labelled, f"остался app.py: {labelled}"
+    titles = [name.replace("_", " ") for name in labelled.values()]
+    assert "Скринер кандидатов" in titles, titles

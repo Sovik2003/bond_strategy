@@ -134,3 +134,59 @@ def test_empty_portfolio_and_empty_universe_is_a_clean_report(cfg):
     assert report.purchases == []
     assert report.stop_reason
     assert report.cash_after == 0.0
+
+
+# --- названия вместо идентификаторов ---------------------------------------
+#
+# Доли считаются по EMITTER_ID, но в отчёте показывались голые номера:
+# «Эмитент 15684 — 15.4%». Номер не сообщает инвестору ничего, и по такой
+# строке нельзя понять, чей лимит превышен.
+
+def test_issuer_slice_shows_names_not_ids(cfg):
+    report, _ = rebalance(AS_OF, 100_000.0, [], [issue("A", issuer="E1"), issue("B", issuer="E2")], cfg)
+    block = next(s for s in report.structure if s["code"] == "issuer")
+    labels = [row["label"] for row in block["rows"]]
+    assert "Эмитент A" in labels
+    assert "E1" not in labels, f"в отчёте остался идентификатор: {labels}"
+    # идентификатор сохранён в ключе: по нему отчёт группируется и сверяется
+    assert {row["key"] for row in block["rows"]} == {"E1", "E2"}
+
+
+def test_group_slice_shows_names_not_ids(cfg):
+    report, _ = rebalance(AS_OF, 100_000.0, [], [issue("A", issuer="E1")], cfg)
+    block = next(s for s in report.structure if s["code"] == "group")
+    labels = [row["label"] for row in block["rows"]]
+    assert "Эмитент A" in labels
+    assert "E1" not in labels
+
+
+def test_group_label_uses_custom_group_name(cfg):
+    """Группу задали словами — показывается это слово, а не номер эмитента."""
+    import dataclasses
+
+    custom = dataclasses.replace(cfg, groups={"E1": "Группа ПСБ"})
+    report, _ = rebalance(AS_OF, 100_000.0, [], [issue("A", issuer="E1")], custom)
+    block = next(s for s in report.structure if s["code"] == "group")
+    assert any(row["label"] == "Группа ПСБ" for row in block["rows"])
+
+
+def test_breaches_use_names_not_ids(cfg):
+    """Предупреждение о превышении — та строка, которую читают первой."""
+    report, _ = rebalance(AS_OF, 10_000.0, [(issue("A", issuer="E1"), 40)], [], cfg)
+    texts = [item["text"] for item in report.breaches.values()]
+    assert any("Эмитент A" in t for t in texts), texts
+    assert not any("Эмитент E1" in t for t in texts), texts
+
+
+def test_issuer_and_group_breaches_are_distinguishable(cfg):
+    """Пока карта групп пуста, группа совпадает с эмитентом.
+
+    Обе проверки нарушаются одинаково, и одинаковый текст выглядит как
+    задвоенная строка. Разные слова показывают, что проверок две.
+    """
+    report, _ = rebalance(AS_OF, 10_000.0, [(issue("A", issuer="E1"), 40)], [], cfg)
+    texts = [item["text"] for item in report.breaches.values()]
+    issuer_lines = [t for t in texts if t.startswith("Эмитент")]
+    group_lines = [t for t in texts if t.startswith("Группа")]
+    assert issuer_lines and group_lines
+    assert set(issuer_lines).isdisjoint(group_lines)
