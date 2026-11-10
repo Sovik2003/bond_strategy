@@ -27,7 +27,7 @@ from datetime import date
 
 from ..analytics.cashflows import CashFlow, build_schedule
 from ..analytics.duration import macaulay_duration
-from ..analytics.yield_calc import calculate_ytm
+from ..analytics.yield_calc import calculate_ytm, coupon_yield
 from ..ingestion.ratings import _RANK
 from ..models import BondIssue
 from .config import RebalanceConfig
@@ -56,6 +56,7 @@ class Purchase:
     years_to_maturity: float | None
     duration: float | None
     ytm: float | None
+    coupon_yield: float | None
     share_before: float
     share_after: float
     reasons: list[str] = field(default_factory=list)
@@ -77,6 +78,7 @@ class Purchase:
             ),
             "duration": None if self.duration is None else round(self.duration, 4),
             "ytm": None if self.ytm is None else round(self.ytm, 6),
+            "coupon_yield": None if self.coupon_yield is None else round(self.coupon_yield, 6),
             "share_before": round(self.share_before, 6),
             "share_after": round(self.share_after, 6),
             "reasons": self.reasons,
@@ -494,6 +496,7 @@ def plan(
                 years_to_maturity=current.years_to_maturity(best.issue),
                 duration=best.duration,
                 ytm=best.ytm,
+                coupon_yield=coupon_yield(best.issue),
                 share_before=best.share_before,
                 share_after=best.share_after,
                 reasons=best.reasons,

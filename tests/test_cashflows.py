@@ -9,7 +9,12 @@ from bond_strategy.analytics.cashflows import (
     total_payout,
     xirr,
 )
-from bond_strategy.analytics.yield_calc import calculate_ytm, purchase_cost_per_bond
+from bond_strategy.analytics.yield_calc import (
+    annual_coupon_per_bond,
+    calculate_ytm,
+    coupon_yield,
+    purchase_cost_per_bond,
+)
 from bond_strategy.config import load_config
 from tests.facts import TEST_DATE, amortizing, normal
 
@@ -152,3 +157,86 @@ def test_amortized_paper_yield_is_sane():
     assert result.ok, result.message
     assert result.ytm is not None
     assert -0.5 < result.ytm < 1.0, f"доходность {result.ytm:.2%} вне разумных пределов"
+
+
+# --- купонная доходность ---------------------------------------------------
+#
+# В таблицу рекомендаций добавлена колонка рядом с YTM. Две похожие цифры
+# рядом без проверки легко расходятся: одна считается от номинала, другая от
+# цены покупки, и перепутать их — значит показать инвестору неверный доход.
+
+
+def test_coupon_yield_counts_from_dirty_price():
+    """Доходность — от того, что инвестор платит: чистая цена плюс НКД.
+
+    normal(): ставка 16%, номинал 1000, цена 98,5%, НКД 7,5.
+    Купон 160 ₽ в год, вложение 985 + 7,5 = 992,5 ₽.
+    """
+    issue = normal()
+    assert annual_coupon_per_bond(issue) == pytest.approx(160.0)
+    assert coupon_yield(issue) == pytest.approx(160.0 / 992.5)
+
+
+def test_coupon_yield_is_not_coupon_rate():
+    """Ставка и доходность — разные величины, и путать их нельзя.
+
+    Здесь они почти совпадают, потому что цена близка к номиналу. Проверяем
+    именно знак расхождения: купили дешевле номинала — доходность выше ставки.
+    """
+    issue = normal()
+    assert coupon_yield(issue) > issue.coupon_rate
+    assert abs(coupon_yield(issue) - issue.coupon_rate) > 1e-6
+
+
+def test_coupon_yield_above_rate_when_bought_at_premium():
+    """Купили дороже номинала — доходность ниже ставки."""
+    issue = normal()
+    issue.clean_price = 105.0
+    issue.accrued_interest = 0.0
+    # 160 ₽ на 1050 ₽ вложений
+    assert coupon_yield(issue) == pytest.approx(160.0 / 1050.0)
+    assert coupon_yield(issue) < issue.coupon_rate
+
+
+def test_coupon_yield_uses_current_nominal_after_amortization():
+    """Купон начисляется на остаточный номинал: после амортизации он меньше.
+
+    Иначе у бумаги, погасившей половину номинала, доходность завышалась бы
+    вдвое — ровно та ошибка, от которой предостерегает `outstanding_before`.
+    """
+    issue = normal()
+    issue.nominal = 400.0
+    issue.initial_nominal = 1000.0
+    # Цена — процент от ТЕКУЩЕГО номинала: 40% от 400 ₽ = 160 ₽. Ставить 40 ₽
+    # здесь значило бы купить за 40% от 400, то есть за 160 ₽, и получить
+    # доходность 40% — цифру, которая к проверке амортизации отношения не имеет.
+    issue.clean_price = 100.0
+    issue.accrued_interest = 0.0
+    # 16% от остаточных 400 ₽, а не от изначальной тысячи: если бы ставка
+    # применялась к initial_nominal, вышло бы 160 ₽ вместо 64 ₽.
+    assert annual_coupon_per_bond(issue) == pytest.approx(64.0)
+    assert coupon_yield(issue) == pytest.approx(0.16)
+    assert annual_coupon_per_bond(issue) < 0.16 * issue.initial_nominal
+
+
+def test_coupon_yield_is_none_without_rate():
+    """Нет ставки — None, а не ноль: ноль значил бы «купон не платят»."""
+    issue = normal()
+    issue.coupon_rate = None
+    assert annual_coupon_per_bond(issue) is None
+    assert coupon_yield(issue) is None
+
+
+def test_coupon_yield_is_none_without_price():
+    """Нет цены — доходность неизвестна, а не бесконечна."""
+    issue = normal()
+    issue.clean_price = None
+    assert coupon_yield(issue) is None
+
+
+def test_coupon_yield_survives_zero_accrued():
+    """НКД равен нулю — законный случай (день выплаты), доходность считается."""
+    issue = normal()
+    issue.accrued_interest = 0.0
+    issue.clean_price = 100.0
+    assert coupon_yield(issue) == pytest.approx(0.16)

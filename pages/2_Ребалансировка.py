@@ -288,6 +288,7 @@ if purchases:
                     "Сумма": fmt_rub(p.get("amount")),
                     "Рейтинг": fmt_text(p.get("rating")),
                     "Срок": fmt_years(p.get("years_to_maturity")),
+                    "Купон": fmt_pct(p.get("coupon_yield")),
                     "YTM": fmt_pct(p.get("ytm")),
                     "Доля после": fmt_pct(p.get("share_after")),
                     "Причина": "; ".join(p.get("reasons") or []) or "—",
@@ -302,6 +303,14 @@ if purchases:
     st.caption(
         f"Итого предлагается купить на {fmt_rub(spent)} "
         f"из {fmt_rub((report.get('cash') or {}).get('before'))} доступных."
+    )
+    st.caption(
+        "**Купон** — текущая купонная доходность: годовой купон к цене покупки "
+        "с НКД. **YTM** — доходность к погашению, в неё кроме купонов входит "
+        "разница между ценой покупки и номиналом. Отсюда расхождение в обе "
+        "стороны: купленная дороже номинала даёт купон выше YTM (переплату "
+        "вернёт только погашение), купленная с дисконтом — наоборот, YTM выше "
+        "купона за счёт прироста капитала."
     )
 else:
     st.info(report.get("stop_reason") or "Покупки не предложены.")

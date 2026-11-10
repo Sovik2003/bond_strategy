@@ -10,6 +10,7 @@
 
 Арифметика: номинал 1000 ₽, цена 100 + НКД 0, поэтому один лот = 1000 ₽.
 """
+import json
 from datetime import date, timedelta
 
 import pytest
@@ -273,6 +274,27 @@ def test_purchase_serialises(cfg):
     assert data["lots"] >= 1
     assert "amount" in data and "reasons" in data
     assert data["share_after"] <= 1.0
+
+
+def test_purchase_carries_coupon_yield(cfg):
+    """Колонка «Купон» в таблице рекомендаций берёт число отсюда.
+
+    Раньше поля не было вовсе, и таблица не могла показать купонную
+    доходность — её пришлось бы считать в интерфейсе, дублируя логику.
+    """
+    result = plan(state(cfg), [issue("A", coupon=0.20)], cfg)
+    data = result.purchases[0].as_dict()
+    assert "coupon_yield" in data
+    assert data["coupon_yield"] is not None
+    # у бумаги с ценой около номинала купонная доходность близка к ставке
+    assert 0.15 < data["coupon_yield"] < 0.25
+
+
+def test_purchase_coupon_yield_is_json_safe(cfg):
+    """None вместо числа не должен ломать сериализацию отчёта."""
+    result = plan(state(cfg), [issue("A")], cfg)
+    text = json.dumps(result.purchases[0].as_dict(), ensure_ascii=False)
+    assert "coupon_yield" in text
 
 
 def test_plan_is_deterministic(cfg):

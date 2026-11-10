@@ -61,6 +61,37 @@ def calculate_ytm(
     return YieldResult(rate, premium, cost, payout, True, "OK")
 
 
+def annual_coupon_per_bond(issue: BondIssue) -> float | None:
+    """Сколько купона придёт на одну бумагу за год по текущему номиналу.
+
+    Ставка применяется к остаточному номиналу, а не к изначальному: после
+    амортизации купон в рублях падает. Именно так считает и график выплат
+    (`cashflows._coupon_flows`), поэтому цифры сходятся.
+    """
+    if not issue.coupon_rate:
+        return None
+    return issue.coupon_rate * issue.nominal
+
+
+def coupon_yield(issue: BondIssue) -> float | None:
+    """Текущая купонная доходность: годовой купон к цене покупки с НКД.
+
+    Это не то же самое, что купонная ставка. Ставка — процент от номинала,
+    назначенный эмитентом; доходность считается от того, что инвестор реально
+    заплатит, а заплатит он грязную цену: чистую плюс НКД. У бумаги, купленной
+    с надбавкой к номиналу, доходность ниже ставки, у купленной с дисконтом —
+    выше.
+
+    Пустая цена или ставка — None, а не ноль. Ноль означал бы «купон не платят»,
+    а отсутствие данных значит «неизвестно», и путать это нельзя.
+    """
+    annual = annual_coupon_per_bond(issue)
+    cost = purchase_cost_per_bond(issue)
+    if annual is None or not cost or cost <= 0:
+        return None
+    return annual / cost
+
+
 def required_premium(issue: BondIssue, cfg: StrategyConfig) -> float:
     key = "core_premium_min" if issue.quality is Quality.HIGH else "medium_premium_min"
     return float(cfg.get("signals", key))
