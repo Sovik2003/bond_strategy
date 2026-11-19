@@ -94,6 +94,7 @@ def run_cached(
     cache_root: str | None,
     strategy_config_path: str,
     rebalance_config_path: str,
+    min_coupon_yield: float,
 ) -> dict:
     """Полный прогон под кэш Streamlit.
 
@@ -130,7 +131,7 @@ def run_cached(
             holdings.append((issue, quantity))
 
     state = build_state(as_of, cash, holdings, rcfg)
-    plan_result = plan(state, universe, rcfg)
+    plan_result = plan(state, universe, rcfg, min_coupon_yield=min_coupon_yield)
     report = build_report(
         as_of=as_of,
         state=state,
@@ -177,6 +178,19 @@ with st.sidebar:
             "Полная загрузка идёт минутами; кэш позволяет добрать позже."
         ),
     )
+    key_rate = st.number_input(
+        "Ключевая ставка ЦБ, %",
+        min_value=0.0,
+        max_value=100.0,
+        value=14.0,
+        step=0.25,
+        format="%.2f",
+        help=(
+            "Купонная доходность новых покупок не может быть ниже этой ставки. "
+            "По умолчанию — решение ЦБ от 23.10.2026. Позиции в портфеле не продаются "
+            "из-за этого правила, только не докупаются."
+        ),
+    )
     page_size = st.slider(
         "Размер страницы загрузки",
         min_value=5,
@@ -218,6 +232,7 @@ if run_clicked:
                 CACHE_ROOT if use_cache else None,
                 str(CONFIG_PATH),
                 str(REBALANCE_CONFIG_PATH),
+                float(key_rate) / 100.0,
             )
     except IssError as exc:
         st.error(f"MOEX ISS недоступен: {exc}")

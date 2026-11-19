@@ -313,3 +313,31 @@ def test_existing_position_can_be_topped_up_within_limit(cfg):
     if result.purchases:
         assert result.purchases[0].isin == "A"
         assert result.purchases[0].lots <= 3
+
+
+# --- порог купонной доходности (ключевая ставка) ------------------------------
+
+
+def test_coupon_below_key_rate_is_not_recommended(cfg):
+    """Купон 10% при ключевой ставке 14% — в рекомендации не попадает."""
+    result = plan(state(cfg), [issue("LOW", coupon=0.10)], cfg, min_coupon_yield=0.14)
+    assert all(p.isin != "LOW" for p in result.purchases)
+    assert any("BELOW_KEY_RATE" in r.codes for r in result.rejected)
+
+
+def test_coupon_above_key_rate_passes(cfg):
+    result = plan(state(cfg), [issue("HIGH", coupon=0.20)], cfg, min_coupon_yield=0.14)
+    assert any(p.isin == "HIGH" for p in result.purchases)
+
+
+def test_without_key_rate_nothing_is_filtered_by_coupon(cfg):
+    """Порог не задан — правило не применяется, поведение прежнее."""
+    result = plan(state(cfg), [issue("LOW", coupon=0.10)], cfg)
+    assert any(p.isin == "LOW" for p in result.purchases)
+    assert not any("BELOW_KEY_RATE" in r.codes for r in result.rejected)
+
+
+def test_key_rate_rejection_reason_names_both_rates(cfg):
+    result = plan(state(cfg), [issue("LOW", coupon=0.10)], cfg, min_coupon_yield=0.14)
+    reason = next(r.reason for r in result.rejected if "BELOW_KEY_RATE" in r.codes)
+    assert "10.00%" in reason and "14.00%" in reason

@@ -385,6 +385,8 @@ def plan(
     state: PortfolioState,
     universe: list[BondIssue],
     cfg: RebalanceConfig,
+    *,
+    min_coupon_yield: float | None = None,
 ) -> PlanResult:
     """Жадный план покупок на доступный остаток.
 
@@ -398,6 +400,23 @@ def plan(
     eligible: list[BondIssue] = []
     for issue in universe:
         verdict = check_eligibility(issue, cfg, state.as_of)
+        if verdict.passed and min_coupon_yield is not None:
+            cy = coupon_yield(issue)
+            if cy is None or cy < min_coupon_yield:
+                result.rejected.append(
+                    Rejected(
+                        isin=issue.isin,
+                        secid=issue.secid,
+                        security_name=issue.security_name,
+                        codes=["BELOW_KEY_RATE"],
+                        reason=(
+                            f"Купонная доходность {cy:.2%} ниже ключевой ставки {min_coupon_yield:.2%}"
+                            if cy is not None
+                            else "Купонная доходность не определена"
+                        ),
+                    )
+                )
+                continue
         if verdict.passed:
             eligible.append(issue)
         else:
